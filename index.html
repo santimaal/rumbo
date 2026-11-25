@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rumbo">
+<title>Rumbo</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icono-180.png">
+<link rel="icon" href="icono-180.png">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.css" integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous">
+<link rel="stylesheet" href="estilo.css">
+<script defer src="https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.js" integrity="sha384-nXMl9YiLoSG5KBPTFgvxVuIqQQcqIvo0bFrvoEaGJC6r7IibIzF1S36Zbf/sKBtL" crossorigin="anonymous"></script>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<main id="vista"></main>
+<p id="aviso" role="status"></p>
+
+<dialog id="dlg-viaje" aria-labelledby="viaje-titulo">
+  <form method="dialog" id="form-viaje">
+    <h2 id="viaje-titulo">Nuevo viaje</h2>
+    <label>¿A dónde vas? <input name="destino" required maxlength="80" placeholder="Escribe una ciudad o un país" autocomplete="off" autocorrect="off"></label>
+    <div id="ciudades" aria-live="polite"></div>
+    <label>Nombre del viaje (opcional) <input name="nombre" maxlength="80" placeholder="Escapada de mayo" autocomplete="off"></label>
+    <label>Días <input name="dias" type="number" inputmode="numeric" min="1" max="30" value="3" required></label>
+    <div class="fila"><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte">Guardar</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-lugares" aria-labelledby="lugares-titulo">
+  <form method="dialog" id="form-lugares">
+    <h2 id="lugares-titulo">Añadir lugares</h2>
+    <label>Enlace del reel o TikTok (opcional) <input name="enlace" type="url" inputmode="url" placeholder="https://" autocomplete="off"></label>
+    <label>Texto de la publicación <textarea name="texto" rows="5" required placeholder="Pega aquí la descripción, o escribe un lugar por línea"></textarea></label>
+    <button type="button" class="suave" id="buscar">Buscar lugares</button>
+    <div id="resultados" aria-live="polite"></div>
+    <div class="fila"><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte" id="anadir" disabled>Añadir</button></div>
+  </form>
+</dialog>
+<dialog id="dlg-ideas" aria-labelledby="ideas-titulo">
+  <form method="dialog" id="form-ideas">
+    <h2 id="ideas-titulo">Qué ver</h2>
+    <input type="search" id="buscar-ideas" placeholder="Busca un sitio, un restaurante…" aria-label="Buscar un sitio" autocomplete="off" enterkeyhint="search">
+    <p id="estado-ideas" class="tenue" role="status"></p>
+    <div id="ideas"></div>
+    <p><small>Lugares de Wikidata y fotos de Wikimedia Commons.</small></p>
+    <div class="fila pie"><button type="button" class="suave" data-cerrar>Ahora no</button><button class="fuerte" id="anadir-ideas" disabled>Añadir</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-nota" aria-labelledby="nota-titulo">
+  <form method="dialog" id="form-nota">
+    <h2 id="nota-titulo">Nota</h2>
+    <textarea name="texto" rows="7" maxlength="5000" aria-labelledby="nota-titulo" placeholder="Reservas, horarios, recordatorios…"></textarea>
+    <div class="fila"><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte">Guardar</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-logistica" aria-labelledby="logistica-titulo">
+  <form method="dialog" id="form-logistica">
+    <h2 id="logistica-titulo">Vuelos y hotel</h2>
+    <p class="tenue">Todo es opcional.</p>
+    <label>Primer día del viaje <input type="date" name="fecha"></label>
+    <fieldset>
+      <legend>Vuelo de ida</legend>
+      <label>Número de vuelo <input name="ida-numero" maxlength="10" placeholder="IB3150" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"></label>
+      <div class="dos"><label>Salida <input type="time" name="ida-salida"></label><label>Llegada <input type="time" name="ida-llegada"></label></div>
+      <p id="info-ida" class="tenue" role="status"></p>
+    </fieldset>
+    <fieldset>
+      <legend>Vuelo de vuelta</legend>
+      <label>Número de vuelo <input name="vuelta-numero" maxlength="10" placeholder="IB3151" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"></label>
+      <div class="dos"><label>Salida <input type="time" name="vuelta-salida"></label><label>Llegada <input type="time" name="vuelta-llegada"></label></div>
+      <p id="info-vuelta" class="tenue" role="status"></p>
+    </fieldset>
+    <fieldset>
+      <legend>Hoteles</legend>
+      <div id="hoteles"></div>
+      <label>Añadir hotel o alojamiento <input type="search" id="hotel-texto" placeholder="Nombre o dirección" autocomplete="off" enterkeyhint="search"></label>
+      <button type="button" class="suave" id="hotel-buscar">Buscar</button>
+      <div id="hoteles-encontrados" class="tenue" role="status"></div>
+    </fieldset>
+    <div class="fila pie"><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte" id="guardar-logistica">Guardar</button></div>
+  </form>
+</dialog>
+<input type="file" id="archivo" accept="application/json,.json" hidden>
+</body>
+</html>
