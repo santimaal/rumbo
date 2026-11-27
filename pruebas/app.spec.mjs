@@ -269,3 +269,58 @@ test('el botón Ir y el selector de día miden lo mismo', async ({ page }) => {
   expect(selector.height).toBe(ir.height);
   expect(await fila.locator('select').evaluate((e) => getComputedStyle(e).appearance)).toBe('none');
 });
+
+test('el botón de atrás del navegador vuelve a la pantalla anterior', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ consejos: [{ tipo: 'comida', texto: 'Supplì' }] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: /Notas y consejos/ }).click();
+  await expect(page.getByRole('heading', { name: 'Notas y consejos' })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Roma' })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
+  await page.goForward();
+  await expect(page.getByRole('heading', { name: 'Roma' })).toBeVisible();
+  // El botón ‹ de la app hace lo mismo y no apila pantallas.
+  await page.getByRole('button', { name: '‹ Viajes' }).click();
+  await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
+});
+
+// Toques reales por CDP: Playwright no tiene un gesto de deslizar.
+async function deslizar(page, desde, hasta, pasos = 8) {
+  const cdp = await page.context().newCDPSession(page);
+  const tocar = (type, x) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y: 400 }] });
+  await tocar('touchStart', desde);
+  for (let i = 1; i <= pasos; i++) await tocar('touchMove', desde + ((hasta - desde) * i) / pasos);
+  await tocar('touchEnd', hasta);
+}
+
+test.describe('instalada en el móvil', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test('deslizar desde el borde izquierdo va atrás', async ({ page }) => {
+    await sinRed(page);
+    await page.addInitScript(() => Object.defineProperty(navigator, 'standalone', { value: true }));
+    await sembrar(page, [viaje()]);
+    await page.goto('/');
+    await page.getByText('Roma', { exact: true }).click();
+    await page.getByRole('button', { name: /Notas y consejos/ }).click();
+
+    // Un deslizamiento corto no cuenta, aunque sea rápido.
+    await deslizar(page, 5, 35);
+    await page.waitForTimeout(300);
+    await expect(page.getByRole('heading', { name: 'Notas y consejos' })).toBeVisible();
+    // Empezar lejos del borde tampoco.
+    await deslizar(page, 150, 380);
+    await page.waitForTimeout(300);
+    await expect(page.getByRole('heading', { name: 'Notas y consejos' })).toBeVisible();
+
+    await deslizar(page, 5, 300);
+    await expect(page.getByRole('heading', { name: 'Roma' })).toBeVisible();
+    await deslizar(page, 5, 300);
+    await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
+    await expect(page.locator('#vista')).toHaveAttribute('style', /transform: none|^$|transform: ;/);
+  });
+});

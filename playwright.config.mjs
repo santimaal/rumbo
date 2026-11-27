@@ -8,6 +8,8 @@ export default defineConfig({
     locale: 'es-ES',
     // PW_CANAL=msedge o chrome usa el navegador ya instalado en vez del que descarga Playwright.
     channel: process.env.PW_CANAL || undefined,
+    // Sin el gesto propio de Chromium para ir atrás, que no existe en la app instalada del iPhone: así solo cuenta el de Rumbo.
+    launchOptions: { args: ['--disable-features=OverscrollHistoryNavigation'] },
   },
   webServer: { command: 'npx http-server -p 8766 -c-1 --silent', port: 8766, reuseExistingServer: true },
 });

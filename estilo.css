@@ -66,6 +66,8 @@ select {
 button:disabled { opacity: .45; cursor: default; }
 [tabindex="-1"]:focus { outline: none; }
 .moviendo .barra { pointer-events: none; }
+.deslizando .barra { visibility: hidden; }
+.deslizando #vista { box-shadow: -8px 0 24px #0003; background: var(--fondo); }
 :focus-visible { outline: 3px solid var(--marca); outline-offset: 2px; }
 .fuerte { background: var(--marca); color: var(--sobre-marca); border-color: transparent; font-weight: 650; }
 .suave { font-weight: 600; }

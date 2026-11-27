@@ -83,11 +83,70 @@ function pintar() {
   else pintarInicio();
 }
 
+const nivel = (id, a) => (a ? 2 : id ? 1 : 0);
+
+/** Cambia de pantalla anotándola en el historial, para que el gesto y el botón de atrás vuelvan a la anterior. */
 function ir(id, a = null) {
+  const estado = { abierto: id, pantalla: a, nivel: nivel(id, a) };
+  if (estado.nivel > (history.state?.nivel ?? 0)) history.pushState(estado, '');
+  else history.replaceState(estado, '');
   abierto = id;
   pantalla = a;
   pintar();
   scrollTo(0, 0);
+}
+
+function volver() {
+  if (history.state?.nivel) history.back();
+  else ir(null);
+}
+
+addEventListener('popstate', (e) => {
+  abierto = e.state?.abierto ?? null;
+  pantalla = e.state?.pantalla ?? null;
+  pintar();
+  scrollTo(0, 0);
+});
+
+// En Safari el borde izquierdo ya va atrás con el historial; instalada en el iPhone no hay gesto, así que se hace aquí.
+function gestoAtras() {
+  if (!navigator.standalone && !matchMedia('(display-mode: standalone)').matches) return;
+  const vista = $('vista');
+  let toque = null;
+  const soltar = (dx) => {
+    const atras = toque?.activo && (dx > innerWidth / 3 || (dx > 40 && dx / (Date.now() - toque.t) > 0.5));
+    toque = null;
+    vista.style.transition = 'transform .2s ease-out';
+    vista.style.transform = atras ? `translateX(${innerWidth}px)` : '';
+    setTimeout(() => {
+      vista.style.transition = '';
+      vista.style.transform = '';
+      document.body.classList.remove('deslizando');
+      if (atras) volver();
+    }, 200);
+  };
+  addEventListener('touchstart', (e) => {
+    const [t] = e.touches;
+    if (e.touches.length > 1 || t.clientX > 30 || !abierto || document.querySelector('dialog[open]') || e.target.closest('#mapa')) return;
+    toque = { x: t.clientX, y: t.clientY, t: Date.now(), activo: false };
+  }, { passive: true });
+  addEventListener('touchmove', (e) => {
+    if (!toque) return;
+    const [t] = e.touches;
+    const dx = t.clientX - toque.x;
+    const dy = t.clientY - toque.y;
+    if (!toque.activo) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > dx) toque = null;
+      if (!toque || dx < 10) return;
+      toque.activo = true;
+      // La barra fija se movería con la pantalla al desplazarla: se esconde mientras dura el gesto.
+      document.body.classList.add('deslizando');
+    }
+    e.preventDefault();
+    vista.style.transform = `translateX(${Math.max(0, dx)}px)`;
+  }, { passive: false });
+  addEventListener('touchend', (e) => { if (toque?.activo) soltar(e.changedTouches[0].clientX - toque.x); else toque = null; });
+  addEventListener('touchcancel', () => { if (toque?.activo) soltar(0); else toque = null; });
 }
 
 function pintarInicio() {
@@ -134,7 +193,7 @@ function pintarViaje(v) {
 
   $('vista').replaceChildren(...[
     el('div', { className: 'arriba' },
-      boton('‹ Viajes', () => ir(null), 'texto'),
+      boton('‹ Viajes', volver, 'texto'),
       el('div', { className: 'iconos' },
         botonIcono('editar', 'Editar viaje', () => editarViaje(v)),
         botonIcono('avion', 'Vuelos y hotel', () => abrirLogistica(v)),
@@ -393,7 +452,7 @@ function editarNota(titulo, texto, poner) {
 function pintarConsejos(v) {
   const ponerNota = (t) => { v.nota = t; };
   $('vista').replaceChildren(...[
-    el('div', { className: 'arriba' }, boton(`‹ ${v.nombre}`, () => ir(v.id), 'texto')),
+    el('div', { className: 'arriba' }, boton(`‹ ${v.nombre}`, volver, 'texto')),
     el('h1', { textContent: 'Notas y consejos' }),
     el('p', { className: 'tenue', textContent: v.destino }),
     el('h2', { className: 'apartado', textContent: 'Nota del viaje' }),
@@ -674,8 +733,8 @@ async function zonaDe(v) {
 function borrarViaje(v) {
   if (!confirm(`¿Borrar «${v.nombre}» y sus lugares? No se puede deshacer.`)) return;
   viajes = viajes.filter((x) => x !== v);
-  abierto = null;
   guardar();
+  volver();
 }
 
 let ciudad = null;
@@ -744,8 +803,8 @@ function editarViaje(v) {
     }
     const [nuevo] = validarViajes({ viajes: [{ ...datos, lugares: [] }] });
     viajes.unshift(nuevo);
-    abierto = nuevo.id;
     guardar();
+    ir(nuevo.id);
     abrirIdeas(nuevo);
   };
   $('dlg-viaje').showModal();
@@ -1204,8 +1263,8 @@ async function recibirViaje() {
     const v = await desempaquetar(paquete);
     if (!confirm(`¿Añadir «${v.nombre}» (${v.destino}) a tus viajes?`)) return;
     viajes.unshift(v);
-    abierto = v.id;
     guardar();
+    ir(v.id);
     avisar('Viaje añadido.');
   } catch (error) {
     avisar(error.message);
@@ -1275,6 +1334,7 @@ $('archivo').onchange = async (e) => {
 };
 
 ponerTema(document.documentElement.dataset.tema);
+gestoAtras();
 recibirViaje();
 recibirPublicacion();
 navigator.storage?.persist?.();
