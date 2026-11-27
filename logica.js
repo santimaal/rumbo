@@ -528,7 +528,7 @@ export function validarViajes(datos) {
         } : null,
       editadoPor: texto(v.editadoPor, 40),
       // Lugares que alguien añadió sin poder situarlos en el mapa (el asistente de IA): los sitúa el móvil al abrir el viaje.
-      porSituar: (Array.isArray(v.porSituar) ? v.porSituar : []).filter((l) => texto(l?.nombre).trim()).slice(0, 40).map((l) => ({
+      porSituar: (Array.isArray(v.porSituar) ? v.porSituar : []).filter((l) => texto(l?.nombre).trim()).slice(0, 200).map((l) => ({
         nombre: texto(l.nombre).trim(),
         dia: Number.isInteger(l.dia) && l.dia >= 1 && l.dia <= dias ? l.dia : 0,
         tipo: CATEGORIAS.some((c) => c.id === l.tipo) ? l.tipo : '',

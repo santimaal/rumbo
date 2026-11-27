@@ -250,3 +250,6 @@ assert.equal(resumenCambios(comun, { ...comun, nombre: 'Otro' }), 'ha cambiado e
   assert.match(readFileSync(new URL('./sw.js', import.meta.url), 'utf8'), new RegExp(`const CACHE = 'rumbo-${NOVEDADES[0].version}';`));
   assert.ok(NOVEDADES.every((n, i) => !i || n.version < NOVEDADES[i - 1].version));
 }
+
+// Un viaje grande del asistente no pierde lugares por situar (antes se cortaba en 40).
+assert.equal(validarViajes({ viajes: [{ lugares: [], porSituar: Array.from({ length: 41 }, (_, i) => ({ nombre: `Sitio ${i}` })) }] })[0].porSituar.length, 41);
