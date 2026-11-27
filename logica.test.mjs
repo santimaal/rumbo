@@ -167,7 +167,7 @@ assert.equal(adivinarCategoria('Café de Flore'), 'cafe');
 assert.equal(adivinarCategoria('Gelateria del Teatro'), 'helado');
 assert.equal(adivinarCategoria('Miradouro da Graça'), 'mirador');
 assert.equal(adivinarCategoria('Panteón'), 'monumento');
-assert.equal(adivinarCategoria('Castel Sant'Angelo'), 'monumento');
+assert.equal(adivinarCategoria('Castel Sant Angelo'), 'monumento');
 assert.equal(adivinarCategoria('Barcelona'), 'otro');
 assert.equal(validarViajes({ viajes: [{ lugares: [{ nombre: 'Basílica de San Pedro', lat: 41.9, lon: 12.45 }] }] })[0].lugares[0].tipo, 'monumento');
 
