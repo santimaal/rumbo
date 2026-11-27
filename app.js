@@ -560,21 +560,21 @@ function botonCategoria(l) {
   });
 }
 
-const ESTANCIAS = [15, 30, 45, 60, 90, 120, 180, 240];
+// De 15 minutos a 6 horas, de cuarto en cuarto.
+const ESTANCIAS = Array.from({ length: 24 }, (_, i) => (i + 1) * 15);
+/** La hora de la parada; tocarla abre el selector de rueda del móvil para el tiempo que se está allí. */
 function botonHoras(l, horas) {
-  return el('button', {
-    type: 'button', className: 'horas', title: 'Cambiar el tiempo que estarás aquí',
-    textContent: `🕐 ${hora(horas.llega)}–${hora(horas.sale)} · ${duracion(estanciaDe(l))}`,
-    onclick: async () => {
-      const m = await preguntar(`¿Cuánto tiempo en ${l.nombre}?`, ESTANCIAS.map((n) => ({
-        texto: `${duracion(n)}${n === estanciaDe(l) ? ' ✓' : ''}`, valor: n,
-      })));
-      if (m) {
-        l.estancia = m;
+  const actual = estanciaDe(l);
+  return el('label', { className: 'horas', title: 'Cambiar el tiempo que estarás aquí' },
+    el('span', { textContent: `🕐 ${hora(horas.llega)}–${hora(horas.sale)} · ${duracion(actual)}` }),
+    el('select', {
+      ariaLabel: `Tiempo en ${l.nombre}`,
+      onchange: (e) => {
+        l.estancia = Number(e.target.value);
         guardar();
-      }
-    },
-  });
+      },
+    }, ...[...new Set([...ESTANCIAS, actual])].sort((a, b) => a - b)
+      .map((n) => el('option', { value: n, textContent: duracion(n), selected: n === actual }))));
 }
 
 function avisoComida(v, dia, comida, l) {
@@ -779,7 +779,7 @@ async function abrirComer(v, dia, inicial = null) {
   lista.replaceChildren();
   $('comer-tipos').replaceChildren();
   estado.textContent = 'Buscando sitios cerca de las paradas…';
-  $('dlg-comer').showModal();
+  if (!$('dlg-comer').open) $('dlg-comer').showModal();
 
   const horas = (s) => (s.horario && semana !== null ? horarioDelDia(s.horario, semana) : null);
   const pintarLista = () => {
@@ -791,42 +791,57 @@ async function abrirComer(v, dia, inicial = null) {
       });
     }));
     // Primero lo que abre ese día y está más cerca; lo que cierra, al final.
-    const visibles = sitios.filter((s) => s.tipo === tipo)
+    const busca = $('buscar-comer').value.trim();
+    const visibles = sitios.filter((s) => s.tipo === tipo && coincide(busca, `${s.nombre} ${s.cocinaTexto}`))
       .sort((a, b) => (horas(a)?.length === 0) - (horas(b)?.length === 0) || a.km - b.km).slice(0, 40);
-    estado.textContent = visibles.length ? '' : 'No hay sitios de este tipo cerca.';
-    lista.replaceChildren(...visibles.map((s) => {
+    estado.textContent = visibles.length ? '' : busca ? 'Ningún sitio se parece a eso.' : 'No hay sitios de este tipo cerca.';
+    lista.replaceChildren(...visibles.map((s, i) => {
       const h = horas(s);
       const detalle = [
-        s.cocina.split(';').map((c) => COCINAS[c.trim()] ?? c.trim().replace(/_/g, ' ')).filter(Boolean).join(', '),
+        s.cocinaTexto,
         `a ${kmTexto(s.km)} de ${s.cerca}`,
         h === null ? '' : h.length ? `abre ${h.map((x) => x.replace('-', '–')).join(' y ')}` : 'cerrado ese día',
       ].filter(Boolean).join(' · ');
-      return el('label', { className: 'hallazgo' },
+      const id = `comer-${i}`;
+      return el('div', { className: 'hallazgo' },
         el('input', {
-          type: 'checkbox', checked: marcados.has(s),
+          type: 'checkbox', id, checked: marcados.has(s),
           onchange: (e) => { if (e.target.checked) marcados.add(s); else marcados.delete(s); aceptar.disabled = !marcados.size; },
         }),
-        el('span', {}, el('strong', { textContent: s.nombre }), el('small', { className: h?.length === 0 ? 'cerrado' : '', textContent: ` ${detalle}` })));
+        el('div', {},
+          el('label', { htmlFor: id }, el('strong', { textContent: s.nombre }), el('small', { className: h?.length === 0 ? 'cerrado' : '', textContent: ` ${detalle}` })),
+          // OpenStreetMap no tiene valoraciones: Google Maps enseña las estrellas, las fotos y la carta.
+          enlace('⭐ Opiniones y fotos ↗', enlaceLugar('google', s, v.destino), 'opiniones')));
     }));
   };
+  $('buscar-comer').value = '';
+  $('buscar-comer').oninput = pintarLista;
 
+  const lento = setTimeout(() => {
+    if (esta === consultaComer && !sitios.length) estado.textContent = 'Los servidores de mapas van lentos. Sigo buscando…';
+  }, 10000);
   try {
     const encontrados = await buscarComida(puntosDelDia(v, dia, paradas));
+    clearTimeout(lento);
     if (esta !== consultaComer) return;
     sitios = encontrados
       .filter((s) => !v.lugares.some((l) => distanciaKm(l, s) < 0.05 && parecido(l.nombre, s.nombre) >= 0.5))
       .map((s) => {
         const cerca = paradas.reduce((a, b) => (distanciaKm(b, s) < distanciaKm(a, s) ? b : a));
-        return { ...s, km: distanciaKm(cerca, s), cerca: cerca.nombre };
+        const cocinaTexto = s.cocina.split(';').map((c) => COCINAS[c.trim()] ?? c.trim().replace(/_/g, ' ')).filter(Boolean).join(', ');
+        return { ...s, km: distanciaKm(cerca, s), cerca: cerca.nombre, cocinaTexto };
       });
   } catch {
-    if (esta === consultaComer) estado.textContent = 'No se pudo buscar. Revisa la conexión.';
+    clearTimeout(lento);
+    if (esta !== consultaComer) return;
+    estado.textContent = 'No se pudo buscar: los servidores de mapas van lentos o no hay conexión.';
+    lista.replaceChildren(boton('Reintentar', () => abrirComer(v, dia, inicial), 'suave'));
     return;
   }
   tipo = [inicial, ...TIPOS_COMER].find((t) => t && sitios.some((s) => s.tipo === t)) ?? 'comida';
   pintarLista();
   $('form-comer').onsubmit = () => {
-    for (const { km, cerca, cocina, ...s } of marcados) meterEnDia(v, dia, s);
+    for (const { km, cerca, cocina, cocinaTexto, ...s } of marcados) meterEnDia(v, dia, s);
     guardar();
   };
 }
@@ -1329,6 +1344,14 @@ $('form-lugares').onsubmit = (e) => {
   anadir(v, elegidos.map((h) => ({ ...h.elegido(), nombre: h.nombre, enlace, tipo: h.tipo() })));
 };
 document.querySelectorAll('[data-cerrar]').forEach((b) => { b.onclick = () => b.closest('dialog').close(); });
+// Las hojas en las que solo se elige algo se cierran tocando fuera, como en el resto de apps.
+for (const id of ['dlg-elegir', 'dlg-ajustes', 'dlg-comer']) {
+  $(id).addEventListener('click', (e) => {
+    if (e.target !== e.currentTarget) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) e.currentTarget.close();
+  });
+}
 
 const CLAVE_TEMA = 'rumbo-tema';
 const oscuro = () => {

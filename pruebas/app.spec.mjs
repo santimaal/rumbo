@@ -445,6 +445,13 @@ test('busca dónde comer cerca de la ruta y lo mete entre las paradas', async ({
   const dialogo = page.getByRole('dialog', { name: /Comer cerca/ });
   await expect(dialogo.getByText('Osteria del Foro')).toBeVisible();
   await expect(dialogo.getByText(/italiana, pizza · a .* de Coliseo · abre 12:00–23:00/)).toBeVisible();
+  await expect(dialogo.getByRole('link', { name: /Opiniones y fotos/ }).first()).toHaveAttribute('href', /^https:\/\/www\.google\.com\/maps\/search\/.*Osteria/);
+  // El buscador tolera erratas y busca también por tipo de cocina.
+  await dialogo.getByLabel('Buscar entre los sitios').fill('piza');
+  await expect(dialogo.getByText('Osteria del Foro')).toBeVisible();
+  await dialogo.getByLabel('Buscar entre los sitios').fill('sushi');
+  await expect(dialogo.getByText('Ningún sitio se parece a eso.')).toBeVisible();
+  await dialogo.getByLabel('Buscar entre los sitios').fill('');
   await dialogo.getByText('Osteria del Foro').click();
   await dialogo.getByRole('button', { name: 'Añadir a la ruta' }).click();
   // Queda entre el Coliseo y el Panteón, que es donde menos se desvía.
@@ -477,10 +484,22 @@ test('cada parada muestra su hora y avisa de cuándo toca comer', async ({ page 
   await page.goto('/');
   await page.getByText('Roma', { exact: true }).click();
   const vaticano = page.locator('.parada', { hasText: 'Museos Vaticanos' });
-  await expect(vaticano.locator('.horas')).toHaveText('🕐 09:00–11:00 · 2 h 00');
-  await vaticano.locator('.horas').click();
-  await page.getByRole('button', { name: '3 h 00' }).click();
-  await expect(vaticano.locator('.horas')).toHaveText('🕐 09:00–12:00 · 3 h 00');
+  await expect(vaticano.locator('.horas span')).toHaveText('🕐 09:00–11:00 · 2 h 00');
+  // Es un selector nativo: en el móvil abre la rueda.
+  await vaticano.getByLabel('Tiempo en Museos Vaticanos').selectOption('180');
+  await expect(vaticano.locator('.horas span')).toHaveText('🕐 09:00–12:00 · 3 h 00');
   await expect(page.locator('.aviso-comida').first()).toContainText('hora de comer cerca de Castel Sant Angelo');
   expect((await guardados(page))[0].lugares[0].estancia).toBe(180);
+});
+
+test('las hojas de opciones se cierran tocando fuera', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: /Categoría de Coliseo/ }).click();
+  await expect(page.locator('#dlg-elegir')).toBeVisible();
+  await page.mouse.click(20, 20);
+  await expect(page.locator('#dlg-elegir')).toBeHidden();
+  expect((await guardados(page))[0].lugares[0].tipo).toBe('monumento');
 });

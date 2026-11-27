@@ -230,14 +230,43 @@ export async function rutaReal(puntos, aPie) {
   };
 }
 
-const OVERPASS = 'https://overpass-api.de/api/interpreter';
+const OVERPASS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+
+// Los servidores públicos de Overpass van a ratos muy lentos: se pregunta a varios a la vez y vale el primero que contesta.
+async function overpass(consulta) {
+  const control = new AbortController();
+  const senal = AbortSignal.any ? AbortSignal.any([control.signal, AbortSignal.timeout(45000)]) : control.signal;
+  try {
+    return await Promise.any(OVERPASS.map(async (url) => {
+      const r = await fetch(`${url}?${new URLSearchParams({ data: consulta })}`, { signal: senal });
+      if (!r.ok) throw new Error(`${new URL(url).host} ${r.status}`);
+      return r.json();
+    }));
+  } finally {
+    control.abort();
+  }
+}
 const AMENIDADES = { restaurant: 'comida', fast_food: 'comida', food_court: 'comida', cafe: 'cafe', bar: 'copas', pub: 'copas', biergarten: 'copas', ice_cream: 'helado' };
 
-/** Restaurantes, cafés, bares y heladerías con nombre a menos de 400 m de alguno de los puntos. */
+const comidas = new Map();
+/** Restaurantes, cafés, bares y heladerías con nombre a menos de 400 m de la ruta que une los puntos. */
 export async function buscarComida(puntos) {
+  // Se recuerda durante la sesión: volver a abrir la lista del mismo día no espera a los servidores.
+  const clave = puntos.map((p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`).join(';');
+  if (!comidas.has(clave)) comidas.set(clave, buscarComidaSinGuardar(puntos).catch((e) => { comidas.delete(clave); throw e; }));
+  return comidas.get(clave);
+}
+
+async function buscarComidaSinGuardar(puntos) {
   const tipos = Object.keys(AMENIDADES).join('|');
-  const consulta = `[out:json][timeout:25];(${puntos.slice(0, 15).map((p) => `nwr(around:400,${p.lat},${p.lon})["amenity"~"^(${tipos})$"]["name"];`).join('')});out center 400;`;
-  const { elements = [] } = (await pedir(OVERPASS, { data: consulta }, 1500)) ?? {};
+  // Un solo filtro alrededor de la línea entera es mucho más rápido que un círculo por parada.
+  const linea = puntos.slice(0, 30).map((p) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`).join(',');
+  const consulta = `[out:json][timeout:25];nwr["amenity"~"^(${tipos})$"]["name"](around:400,${linea});out center 400;`;
+  const { elements = [] } = (await overpass(consulta)) ?? {};
   const vistos = new Set();
   return elements.flatMap(({ type, id, lat, lon, center, tags = {} }) => {
     const clave = `${type}${id}`;
@@ -263,7 +292,7 @@ export async function buscarHorarios(lugares) {
   for (let i = 0; i < lugares.length; i += 20) {
     const tanda = lugares.slice(i, i + 20);
     const consulta = `[out:json][timeout:20];(${tanda.map((l) => `nwr(around:80,${l.lat},${l.lon})["opening_hours"];`).join('')});out center;`;
-    const { elements = [] } = await pedir(OVERPASS, { data: consulta }, 1500);
+    const { elements = [] } = await overpass(consulta);
     for (const l of tanda) {
       const [mejor] = elements
         .map((e) => ({ e, nota: Math.max(0, ...nombresOsm(e.tags ?? {}).map((n) => parecido(l.nombre, n))) }))

@@ -120,8 +120,11 @@ assert.match(enlace, /^[\w-]+$/);
 const recibido = await desempaquetar(enlace);
 assert.notEqual(recibido.id, 'x');
 assert.equal(recibido.lugares[0].foto, undefined);
-assert.deepEqual({ ...recibido, id: 'x', lugares: [] }, { ...original, origen: 'x', lugares: [] });
-assert.equal(recibido.lugares[0].horario, 'Mo-Su 09:00-19:00');
+const sinIds = (cs) => cs.map(({ id, ...c }) => c);
+assert.deepEqual({ ...recibido, id: 'x', lugares: [], consejos: sinIds(recibido.consejos) }, { ...original, origen: 'x', lugares: [], consejos: sinIds(original.consejos) });
+// El horario no viaja en el enlace: se vuelve a buscar.
+assert.equal(recibido.lugares[0].horario, undefined);
+assert.equal(recibido.lugares[0].tipo, 'monumento');
 await assert.rejects(desempaquetar('basura'));
 
 // Rutas mixtas: en coche hasta la zona y andando entre lo que está cerca.
@@ -194,3 +197,18 @@ assert.deepEqual(conRestaurante.comidas.map((c) => c.tipo), ['cena']);
 const llegada = agenda({ dias: 2, ida: { llegada: '11:00' } }, 1, [{ tipo: 'monumento' }, { tipo: 'monumento' }], [0, 0]);
 assert.deepEqual(llegada.horas.map((h) => hora(h.llega)), ['12:30', '14:30']);
 assert.ok(minutosTramo(p('', 0, 0), p('', 0, 0.01)) > 15 && minutosTramo(p('', 0, 0), p('', 0, 0.01)) < 25);
+
+// El enlace de un viaje real de 8 lugares queda bastante más corto que antes (1087 caracteres).
+const praga = validarViajes({ viajes: [{ id: 'cd801960-d101-4313-8b6c-e6dfbc286cd3', nombre: 'Marta', destino: 'Praga, Chequia', pais: 'CZ', dias: 5,
+  zona: { lat: 50.08804, lon: 14.42076, radio: 15 }, consejos: [{ tipo: 'comida', texto: 'holaa' }], lugares: [
+    ['Museo Nacional de Praga', 50.0798433, 14.4304172, 1, ''], ['Galería Nacional de Praga', 50.101111, 14.4325, 1, ''],
+    ['Plaza de Wenceslao', 50.082308, 14.426141, 2, ''], ['Iglesia de Nuestra Señora en frente del Týn', 50.08771, 14.4227, 2, 'Iglesia en la ciudad vieja de Praga'],
+    ['Plaza de la Ciudad Vieja', 50.0875, 14.42138889, 3, 'Plaza histórica situada en la ciudad vieja de Praga'], ['Puente Carlos', 50.08638889, 14.41194444, 4, 'Puente en Praga, República Checa'],
+    ['Castillo de Praga', 50.09, 14.4, 4, ''], ['Catedral de San Vito', 50.09083333, 14.40055556, 5, 'Templo de Praga'],
+  ].map(([nombre, lat, lon, dia, direccion]) => ({ nombre, lat, lon, dia, direccion, horario: 'Mo-Su 09:00-17:00', foto: 'https://upload.wikimedia.org/x.jpg' })) }] })[0];
+const corto = await empaquetar(praga);
+assert.ok(corto.length < 750, `enlace de ${corto.length} caracteres`);
+const pragaRecibida = await desempaquetar(corto);
+assert.deepEqual(pragaRecibida.lugares.map((l) => [l.nombre, l.dia, l.tipo]), praga.lugares.map((l) => [l.nombre, l.dia, l.tipo]));
+assert.equal(pragaRecibida.consejos[0].texto, 'holaa');
+assert.equal(pragaRecibida.zona.lat, 50.08804);

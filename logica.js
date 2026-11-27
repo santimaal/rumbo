@@ -260,13 +260,30 @@ const base64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, 
 const desdeBase64url = (t) => Uint8Array.from(atob(t.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 const pasar = async (bytes, flujo) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(flujo)).arrayBuffer());
 
+const vacio = (x) => x === '' || x === null || x === undefined || x === 0 || x === false
+  || (Array.isArray(x) && !x.length) || (typeof x === 'object' && !Array.isArray(x) && !Object.keys(x).length);
+/** Quita lo vacío o por defecto (al validar vuelve) y deja las coordenadas en 5 decimales, más de un metro de precisión. */
+const compactar = (x) => {
+  if (Array.isArray(x)) return x.map(compactar);
+  if (x && typeof x === 'object') return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, compactar(v)]).filter(([, v]) => !vacio(v)));
+  return typeof x === 'number' ? Math.round(x * 1e5) / 1e5 : x;
+};
+
 /**
- * Viaje comprimido para ir en un enlace. Las fotos se quitan: quien lo abra las vuelve a buscar.
+ * Viaje comprimido para ir en un enlace. Se queda fuera lo que se puede volver a calcular o buscar: fotos,
+ * horarios, identificadores internos y la categoría cuando coincide con la que sale del nombre.
  * `origen` es el viaje del que salió la primera copia, para reconocerlo si se vuelve a compartir.
  */
 export async function empaquetar(viaje) {
   const { id, ...resto } = viaje;
-  const ligero = { ...resto, origen: viaje.origen || id, lugares: viaje.lugares.map(({ foto, autoria, ...l }) => l) };
+  const ligero = compactar({
+    ...resto,
+    origen: viaje.origen || id,
+    lugares: viaje.lugares.map(({ id: _, foto, autoria, horario, tipo, ...l }) => ({
+      ...l, tipo: tipo === adivinarCategoria(`${l.nombre} ${l.direccion ?? ''}`) ? '' : tipo,
+    })),
+    consejos: viaje.consejos?.map(({ id: _, ...c }) => c),
+  });
   return base64url(await pasar(new TextEncoder().encode(JSON.stringify(ligero)), new CompressionStream('deflate-raw')));
 }
 
@@ -537,9 +554,10 @@ export const mismoViaje = (viajes, recibido) => viajes.find((v) => v.id === reci
 
 /** Pone en `mio` los datos de un viaje recibido, sin perder su identificador, sus fotos ni los días que tenía ocultos. */
 export function actualizarViaje(mio, recibido) {
-  const antes = new Map(mio.lugares.map((l) => [l.id, l]));
+  // Los lugares no viajan con su identificador: se reconocen por nombre y sitio.
+  const mismo = (a, b) => a.id === b.id || (a.nombre === b.nombre && distanciaKm(a, b) < 0.05);
   for (const l of recibido.lugares) {
-    const previo = antes.get(l.id);
+    const previo = mio.lugares.find((x) => mismo(x, l));
     if (previo?.foto !== undefined) Object.assign(l, { foto: previo.foto, autoria: previo.autoria });
   }
   Object.assign(mio, { ...recibido, id: mio.id, origen: mio.origen, ocultos: mio.ocultos.filter((d) => d <= recibido.dias) });
