@@ -63,6 +63,8 @@ const ICONOS = {
   compartir: '<path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>',
   borrar: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/><path d="M10 11v6M14 11v6"/>',
   avion: '<path d="M2 16.5 22 9c-.5-1.8-2.3-2.6-4-2L14 8.5 7 4 5 5l4.5 5-4 1.5L3 10l-1.5 1L5 14z"/><path d="M3 21h18"/>',
+  ojo: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  ojoTachado: '<path d="M10.7 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.2M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a10 10 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m2 2 20 20"/>',
   ajustes: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
 };
 function botonIcono(nombre, etiqueta, onclick, className = '') {
@@ -222,7 +224,7 @@ let calculandoRutas = false;
 async function completarRutas(v) {
   if (calculandoRutas) return;
   const pendientes = Array.from({ length: v.dias }, (_, i) => {
-    const lugares = v.lugares.filter((l) => l.dia === i + 1);
+    const lugares = v.ocultos.includes(i + 1) ? [] : v.lugares.filter((l) => l.dia === i + 1);
     return lugares.length ? puntosDelDia(v, i + 1, lugares) : [];
   }).filter((p) => p.length > 1 && p.length <= 50 && !rutaDe(p) && !rutasFallidas.has(claveRuta(p)));
   if (!pendientes.length) return;
@@ -308,7 +310,24 @@ function lineaVuelo(v, dia) {
   return lineas.map((l) => el('p', { className: 'vuelo', textContent: `\u2708\uFE0E ${l.filter(Boolean).join(' · ')}` }));
 }
 
+function alternarDia(v, dia) {
+  v.ocultos = v.ocultos.includes(dia) ? v.ocultos.filter((d) => d !== dia) : [...v.ocultos, dia];
+  guardar();
+}
+
+/** Un día oculto solo deja su cabecera, y desaparece del mapa, para centrarse en los demás. */
+function diaOculto(v, dia, lugares) {
+  const seccion = el('section', { className: 'dia oculto', color: color(dia) },
+    el('div', { className: 'cabecera' },
+      el('h2', { textContent: dia ? `Día ${dia}` : 'Sin día' }),
+      el('small', { textContent: `Oculto · ${plural(lugares.length, 'lugar', 'lugares')}` }),
+      botonIcono('ojoTachado', `Mostrar ${dia ? `el día ${dia}` : 'los lugares sin día'}`, () => alternarDia(v, dia))));
+  seccion.dataset.dia = dia;
+  return seccion;
+}
+
 function seccionDia(v, dia, lugares) {
+  if (v.ocultos.includes(dia)) return diaOculto(v, dia, lugares);
   const ends = dia ? extremosDelDia(v, dia) : {};
   const puntos = dia ? puntosDelDia(v, dia, lugares) : [];
   const real = lugares.length && puntos.length > 1 ? rutaDe(puntos) : null;
@@ -327,7 +346,8 @@ function seccionDia(v, dia, lugares) {
   const seccion = el('section', { className: 'dia', color: color(dia) },
     el('div', { className: 'cabecera' },
       el('h2', { textContent: dia ? `Día ${dia}` : 'Sin día' }),
-      dia && !v.notasDia[dia] ? boton('Nota', () => editarNota(`Nota del día ${dia}`, '', ponerNota), 'texto') : null),
+      dia && !v.notasDia[dia] ? boton('Nota', () => editarNota(`Nota del día ${dia}`, '', ponerNota), 'texto') : null,
+      botonIcono('ojo', `Ocultar ${dia ? `el día ${dia}` : 'los lugares sin día'}`, () => alternarDia(v, dia))),
     rutas.length ? el('div', { className: 'fila rutas' },
       ...rutas.map(({ href, modo }, i) => enlace(`${MODOS[modo]} ${rutas.length > 1 ? `Ruta ${i + 1}` : 'Ruta'}`, href, 'boton ruta'))) : null,
     el('small', { textContent: resumen }),
@@ -546,7 +566,8 @@ async function pintarMapa(div, v) {
   try {
     const estilo = await estiloMapa(oscuro());
     if (!div.isConnected) return;
-    const puntos = [...v.lugares, ...v.hoteles].map((l) => [l.lon, l.lat]);
+    const visibles = v.lugares.filter((l) => !v.ocultos.includes(l.dia));
+    const puntos = [...(visibles.length ? visibles : v.lugares), ...v.hoteles].map((l) => [l.lon, l.lat]);
     const limites = puntos.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(puntos[0], puntos[0]));
     mapa = new maplibregl.Map({
       container: div, style: estilo, bounds: limites, fitBoundsOptions: { padding: 40, maxZoom: 15 },
@@ -558,7 +579,7 @@ async function pintarMapa(div, v) {
   }
   const este = mapa;
   este.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
-  const porDia = Array.from({ length: v.dias + 1 }, (_, dia) => v.lugares.filter((l) => l.dia === dia));
+  const porDia = Array.from({ length: v.dias + 1 }, (_, dia) => (v.ocultos.includes(dia) ? [] : v.lugares.filter((l) => l.dia === dia)));
   porDia.forEach((lugares, dia) => lugares.forEach((l, i) => {
     const pin = el('div', { className: 'pin', color: color(dia), textContent: i + 1, title: l.nombre });
     new maplibregl.Marker({ element: pin }).setLngLat([l.lon, l.lat])
@@ -717,6 +738,7 @@ function editarViaje(v) {
       Object.assign(v, datos);
       v.lugares.forEach((l) => { if (l.dia > v.dias) l.dia = 0; });
       v.hoteles.forEach((h) => { h.desde = Math.min(h.desde, v.dias); });
+      v.ocultos = v.ocultos.filter((d) => d <= v.dias);
       guardar();
       return;
     }

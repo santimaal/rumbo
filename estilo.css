@@ -57,7 +57,12 @@ button, .boton, select {
   background: var(--carta); padding: 8px 14px; cursor: pointer; text-decoration: none;
   display: inline-flex; align-items: center; justify-content: center;
 }
-select { font-size: 16px; padding: 6px 8px; max-width: 100%; }
+/* Sin el aspecto nativo, que en iPhone ignora la altura y queda más bajo que los botones. */
+select {
+  font-size: 16px; padding: 6px 30px 6px 10px; max-width: 100%; height: 44px; -webkit-appearance: none; appearance: none;
+  background: var(--carta) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a8c93' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center / 16px;
+}
+.parada .fila > :is(.boton, button, select) { height: 44px; }
 button:disabled { opacity: .45; cursor: default; }
 [tabindex="-1"]:focus { outline: none; }
 .moviendo .barra { pointer-events: none; }
@@ -85,6 +90,9 @@ button:disabled { opacity: .45; cursor: default; }
 /* Cada día es una línea de metro y cada lugar una parada. */
 .dia { margin: 28px 0 0; }
 .cabecera { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.cabecera .icono { margin-left: auto; color: var(--tenue); }
+.oculto .cabecera h2 { opacity: .5; }
+.oculto .cabecera small { color: var(--tenue); }
 .cabecera h2 { background: var(--c); color: #fff; border-radius: 8px; padding: 4px 10px; line-height: 1.2; }
 .rutas { margin: 8px 0 6px; gap: 6px; }
 .ruta { white-space: nowrap; border: 2px solid var(--c); color: var(--c); background: none; font-weight: 650; padding: 4px 12px; }

@@ -401,6 +401,8 @@ export function validarViajes(datos) {
       nota: texto(v.nota, NOTA),
       notasDia: notasValidas(v.notasDia),
       consejos: consejosValidos(v.consejos),
+      // Días que no se muestran; por defecto se ven todos.
+      ocultos: [...new Set(Array.isArray(v.ocultos) ? v.ocultos : [])].filter((d) => Number.isInteger(d) && d >= 0 && d <= dias),
       lugares: v.lugares.map((l) => {
         if (!coordenadas(l)) {
           throw new Error('La copia tiene un lugar sin coordenadas válidas.');

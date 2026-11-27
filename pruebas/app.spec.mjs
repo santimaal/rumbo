@@ -236,3 +236,36 @@ test('avisa de una versión nueva y la aplica sin reinstalar', async ({ browser 
     await copia.cerrar();
   }
 });
+
+test('un día se puede ocultar y volver a mostrar', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 2)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  const dia1 = page.locator('.dia').first();
+  await expect(dia1).toContainText('Coliseo');
+  await page.getByRole('button', { name: 'Ocultar el día 1' }).click();
+  await expect(dia1).toContainText('Oculto · 1 lugar');
+  await expect(dia1).not.toContainText('Coliseo');
+  await expect(page.locator('.dia').nth(1)).toContainText('Panteón');
+  expect((await guardados(page))[0].ocultos).toEqual([1]);
+
+  await page.reload();
+  await page.getByText('Roma', { exact: true }).click();
+  await expect(page.locator('.dia').first()).toContainText('Oculto');
+  await page.getByRole('button', { name: 'Mostrar el día 1' }).click();
+  await expect(page.locator('.dia').first()).toContainText('Coliseo');
+  expect((await guardados(page))[0].ocultos).toEqual([]);
+});
+
+test('el botón Ir y el selector de día miden lo mismo', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  const fila = page.locator('.parada', { hasText: 'Coliseo' }).locator('.fila');
+  const ir = await fila.getByRole('link', { name: 'Ir' }).boundingBox();
+  const selector = await fila.locator('select').boundingBox();
+  expect(selector.height).toBe(ir.height);
+  expect(await fila.locator('select').evaluate((e) => getComputedStyle(e).appearance)).toBe('none');
+});
