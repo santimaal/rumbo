@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje, adivinarCategoria, mejorHueco, ordenarDias, agenda, hora, minutosTramo } from './logica.js';
+import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje, adivinarCategoria, mejorHueco, ordenarDias, agenda, hora, minutosTramo, datosNube } from './logica.js';
 
 assert.deepEqual(
   extraerLugares('Lo mejor de Roma 😍\n📍 Trattoria Da Enzo - la mejor pasta\n📍Panteón 📍 Coliseo (reserva!)\n#roma #viajes'),
@@ -212,3 +212,9 @@ const pragaRecibida = await desempaquetar(corto);
 assert.deepEqual(pragaRecibida.lugares.map((l) => [l.nombre, l.dia, l.tipo]), praga.lugares.map((l) => [l.nombre, l.dia, l.tipo]));
 assert.equal(pragaRecibida.consejos[0].texto, 'holaa');
 assert.equal(pragaRecibida.zona.lat, 50.08804);
+
+// Viajes compartidos: lo que es de cada móvil no se sube, y el código de la nube se valida.
+const compartido = validarViajes({ viajes: [{ id: 'local', nombre: 'Roma', dias: 2, ocultos: [1], nube: { id: '4f773d3134004bd3', version: 3 }, lugares: [] }] })[0];
+assert.deepEqual(compartido.nube, { id: '4f773d3134004bd3', version: 3, pendiente: false });
+assert.deepEqual(Object.keys(datosNube(compartido)).filter((k) => ['id', 'nube', 'ocultos'].includes(k)), []);
+assert.equal(validarViajes({ viajes: [{ lugares: [], nube: { id: '../otra', version: 1 } }] })[0].nube, null);

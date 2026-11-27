@@ -519,6 +519,9 @@ export function validarViajes(datos) {
       })),
       nota: texto(v.nota, NOTA),
       notasDia: notasValidas(v.notasDia),
+      // Viaje compartido en la nube: su código y la última versión que se conoce.
+      nube: /^[a-z0-9]{8,40}$/.test(v.nube?.id ?? '') && Number.isInteger(v.nube.version)
+        ? { id: v.nube.id, version: v.nube.version, pendiente: v.nube.pendiente === true } : null,
       consejos: consejosValidos(v.consejos),
       // Días que no se muestran; por defecto se ven todos.
       ocultos: [...new Set(Array.isArray(v.ocultos) ? v.ocultos : [])].filter((d) => Number.isInteger(d) && d >= 0 && d <= dias),
@@ -561,4 +564,10 @@ export function actualizarViaje(mio, recibido) {
     if (previo?.foto !== undefined) Object.assign(l, { foto: previo.foto, autoria: previo.autoria });
   }
   Object.assign(mio, { ...recibido, id: mio.id, origen: mio.origen, ocultos: mio.ocultos.filter((d) => d <= recibido.dias) });
+}
+
+/** Lo que se guarda en la nube de un viaje compartido: todo menos lo que es de cada móvil. */
+export function datosNube(v) {
+  const { id, nube, ocultos, ...resto } = v;
+  return resto;
 }

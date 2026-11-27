@@ -10,9 +10,11 @@ const ROMA = { lat: 41.89, lon: 12.49, radio: 15, pais: '' };
 const viaje = (extra) => ({ id: 'roma', nombre: 'Roma', destino: 'Roma, Italia', pais: 'IT', zona: ROMA, dias: 2, lugares: [], hoteles: [], ...extra });
 
 // Los servicios de fuera responden con datos fijos para que las pruebas no dependan de la red.
-async function sinRed(page, { horarios = [] } = {}) {
+async function sinRed(page, { horarios = [], nube = false } = {}) {
   await page.route(/^https?:\/\/(?!localhost)/, (route) => {
     const url = new URL(route.request().url());
+    // Con una nube falsa instalada en el contexto, Supabase la atiende ella.
+    if (nube && url.host.endsWith('supabase.co')) return route.fallback();
     const json = (cuerpo) => route.fulfill({ json: cuerpo });
     if (url.host === 'api.open-meteo.com') {
       const desde = new Date(`${url.searchParams.get('start_date')}T12:00:00Z`);
@@ -502,4 +504,101 @@ test('las hojas de opciones se cierran tocando fuera', async ({ page }) => {
   await page.mouse.click(20, 20);
   await expect(page.locator('#dlg-elegir')).toBeHidden();
   expect((await guardados(page))[0].lugares[0].tipo).toBe('monumento');
+});
+
+// Supabase de mentira para dos móviles: las tres funciones de viajes y los avisos de Realtime entre ellos.
+function nubeFalsa() {
+  const viajes = new Map();
+  const salas = new Map();
+  let n = 0;
+  const instalar = async (contexto) => {
+    await contexto.route('https://centngtgakviminnkkva.supabase.co/rest/v1/rpc/*', (route) => {
+      const funcion = route.request().url().split('/').at(-1);
+      const p = route.request().postDataJSON();
+      if (funcion === 'crear_viaje') {
+        const id = `prueba${String(++n).padStart(4, '0')}`;
+        viajes.set(id, { datos: p.p_datos, version: 1 });
+        return route.fulfill({ json: id });
+      }
+      const v = viajes.get(p.p_id);
+      if (funcion === 'leer_viaje') return route.fulfill({ json: v ? [structuredClone(v)] : [] });
+      if (!v || v.version !== p.p_version) return route.fulfill({ json: null });
+      Object.assign(v, { datos: p.p_datos, version: v.version + 1 });
+      return route.fulfill({ json: v.version });
+    });
+    await contexto.routeWebSocket(/supabase\.co\/realtime/, (ws) => {
+      ws.onMessage((mensaje) => {
+        const { topic, event, payload, ref } = JSON.parse(mensaje);
+        if (event === 'phx_join') {
+          if (!salas.has(topic)) salas.set(topic, new Set());
+          salas.get(topic).add(ws);
+          ws.send(JSON.stringify({ topic, event: 'phx_reply', payload: { status: 'ok', response: {} }, ref }));
+        }
+        if (event === 'broadcast') {
+          for (const otro of salas.get(topic) ?? []) if (otro !== ws) otro.send(JSON.stringify({ topic, event, payload }));
+        }
+      });
+    });
+  };
+  return { viajes, instalar };
+}
+
+test('un viaje compartido se sincroniza solo entre dos móviles', async ({ browser }) => {
+  const falsa = nubeFalsa();
+  const [movilA, movilB] = await Promise.all([browser.newContext(), browser.newContext()]);
+  await falsa.instalar(movilA);
+  await falsa.instalar(movilB);
+  const a = await movilA.newPage();
+  const b = await movilB.newPage();
+  await sinRed(a, { nube: true });
+  await sinRed(b, { nube: true });
+
+  a.on('dialog', (d) => d.accept());
+  b.on('dialog', (d) => d.accept());
+  await a.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
+  await sembrar(a, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
+
+  await a.goto('/');
+  await a.getByText('Roma', { exact: true }).click();
+  await a.getByRole('button', { name: 'Compartir viaje' }).click();
+  const url = await a.waitForFunction(() => window.compartido).then((h) => h.jsonValue());
+  expect(url).toMatch(/\/#v=prueba0001$/);
+  await expect(a.getByText('Roma, Italia · 2 días · ☁️ compartido')).toBeVisible();
+
+  await b.goto(url);
+  await expect(b.getByRole('heading', { name: 'Roma' })).toBeVisible();
+  await expect(b.getByText(/☁️ compartido/)).toBeVisible();
+
+  // B añade un consejo y A lo ve sin recargar.
+  await b.getByRole('button', { name: /Notas y consejos/ }).click();
+  await b.getByRole('button', { name: '+ Consejo' }).click();
+  await b.getByLabel('Consejo', { exact: true }).fill('Supplì en Trastevere');
+  await b.getByRole('button', { name: 'Guardar' }).click();
+  await expect(a.getByRole('button', { name: /Notas y consejos.*1 consejo/ })).toBeVisible({ timeout: 10000 });
+  expect(falsa.viajes.get('prueba0001').version).toBe(2);
+
+  // A quita una parada y desaparece también en B.
+  await b.getByRole('button', { name: '‹ Roma' }).click();
+  await a.getByRole('button', { name: 'Quitar Coliseo' }).click();
+  await expect(b.locator('.parada', { hasText: 'Coliseo' })).toHaveCount(0, { timeout: 10000 });
+  await expect(b.locator('.parada', { hasText: 'Panteón' })).toBeVisible();
+
+  // Ocultar un día es cosa de cada móvil: no se comparte.
+  await a.getByRole('button', { name: 'Ocultar el día 1' }).click();
+  await b.waitForTimeout(2500);
+  await expect(b.locator('.dia').first()).not.toContainText('Oculto');
+  await movilA.close();
+  await movilB.close();
+});
+
+test('sin conexión con la nube, compartir usa el enlace largo', async ({ page }) => {
+  await sinRed(page);
+  await page.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
+  await sembrar(page, [viaje()]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Compartir viaje' }).click();
+  const url = await page.waitForFunction(() => window.compartido).then((h) => h.jsonValue());
+  expect(url).toMatch(/#viaje=[\w-]+$/);
+  await expect(page.getByText(/copia del viaje que no se actualizará sola/)).toBeVisible();
 });

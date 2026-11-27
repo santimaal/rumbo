@@ -314,3 +314,64 @@ export async function prevision(zona, desde, hasta) {
     codigo: daily.weather_code[i], max: daily.temperature_2m_max[i], min: daily.temperature_2m_min[i], lluvia: daily.precipitation_probability_max[i],
   }]));
 }
+
+// Viajes compartidos en Supabase. La clave es pública a propósito: solo deja usar las tres funciones
+// de viajes compartidos, que piden el código de cada viaje; la tabla no se puede leer ni listar.
+const SUPABASE = 'https://centngtgakviminnkkva.supabase.co';
+const CLAVE_SUPABASE = 'sb_publishable_dVqHWB9XsMJZ8AOVrFVGrw_1goCCoFT';
+
+async function rpc(funcion, params) {
+  const r = await fetch(`${SUPABASE}/rest/v1/rpc/${funcion}`, {
+    method: 'POST',
+    headers: { apikey: CLAVE_SUPABASE, 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!r.ok) throw new Error(`Supabase ${r.status}`);
+  return r.json();
+}
+
+export const nube = {
+  crear: (datos) => rpc('crear_viaje', { p_datos: datos }),
+  leer: async (id) => (await rpc('leer_viaje', { p_id: id }))[0] ?? null,
+  /** Devuelve la versión nueva, o null si alguien lo cambió desde `version`. */
+  guardar: (id, datos, version) => rpc('guardar_viaje', { p_id: id, p_datos: datos, p_version: version }),
+};
+
+// Avisos al instante entre móviles con Supabase Realtime: un canal por viaje, por WebSocket y sin librerías.
+const canales = new Map();
+let socket = null;
+let latido;
+let referencia = 0;
+const enviar = (topic, event, payload) => {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ topic, event, payload, ref: String(++referencia) }));
+};
+const unirse = (id) => enviar(`realtime:viaje-${id}`, 'phx_join', { config: { broadcast: { self: false }, presence: { key: '' }, private: false } });
+
+function conectar() {
+  if (socket && socket.readyState <= WebSocket.OPEN) return;
+  socket = new WebSocket(`${SUPABASE.replace('https', 'wss')}/realtime/v1/websocket?apikey=${CLAVE_SUPABASE}&vsn=1.0.0`);
+  socket.onopen = () => {
+    for (const id of canales.keys()) unirse(id);
+    latido = setInterval(() => enviar('phoenix', 'heartbeat', {}), 25000);
+  };
+  socket.onmessage = (m) => {
+    const { topic, event } = JSON.parse(m.data);
+    if (event === 'broadcast') canales.get(topic.replace('realtime:viaje-', ''))?.();
+  };
+  // Sin conexión se reintenta cada poco; al volver, cada viaje se pone al día por su cuenta.
+  socket.onclose = () => {
+    clearInterval(latido);
+    if (canales.size) setTimeout(conectar, 15000);
+  };
+}
+
+/** Llama a `alCambiar` cada vez que otro móvil avise de que el viaje ha cambiado. */
+export function escucharViaje(id, alCambiar) {
+  const nuevo = !canales.has(id);
+  canales.set(id, alCambiar);
+  conectar();
+  if (nuevo) unirse(id);
+}
+
+export const avisarCambio = (id) => enviar(`realtime:viaje-${id}`, 'broadcast', { type: 'broadcast', event: 'cambio', payload: {} });

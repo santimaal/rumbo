@@ -1,4 +1,4 @@
-const CACHE = 'rumbo-9';
+const CACHE = 'rumbo-10';
 const MAPLIBRE = 'https://unpkg.com/maplibre-gl@5.24.1/dist/';
 const ARCHIVOS = ['./', 'estilo.css', 'app.js', 'logica.js', 'fuentes.js', 'manifest.webmanifest', 'icono-180.png', `${MAPLIBRE}maplibre-gl.js`, `${MAPLIBRE}maplibre-gl.css`];
 
