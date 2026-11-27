@@ -41,12 +41,14 @@ async function sinRed(page, { horarios = [], nube = false } = {}) {
   });
 }
 
-async function sembrar(page, viajes) {
-  await page.addInitScript((datos) => {
+async function sembrar(page, viajes, { novedadesVistas = true } = {}) {
+  await page.addInitScript(([datos, vistas]) => {
     if (sessionStorage.getItem('sembrado')) return;
     localStorage.setItem('rumbo', JSON.stringify({ viajes: datos }));
+    // En las pruebas no estorba la ventana de novedades, salvo en la suya.
+    if (vistas) localStorage.setItem('rumbo-novedades', '999');
     sessionStorage.setItem('sembrado', '1');
-  }, viajes);
+  }, [viajes, novedadesVistas]);
 }
 
 const guardados = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('rumbo')).viajes);
@@ -168,6 +170,8 @@ test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ 
   await page.goto('/');
   await page.getByText('Roma', { exact: true }).click();
   await page.getByRole('button', { name: 'Compartir viaje' }).click();
+  await page.getByRole('button', { name: 'Enviar enlace' }).click();
+  await page.keyboard.press('Escape');
   const url = await page.waitForFunction(() => window.compartido).then((h) => h.jsonValue());
   expect(url).toMatch(/#viaje=[\w-]+$/);
 
@@ -340,6 +344,8 @@ test('volver a compartir un viaje actualiza la copia de la otra persona', async 
   const compartir = async () => {
     await page.evaluate(() => { window.compartido = null; });
     await page.getByRole('button', { name: 'Compartir viaje' }).click();
+    await page.getByRole('button', { name: 'Enviar enlace' }).click();
+    await page.keyboard.press('Escape');
     return page.waitForFunction(() => window.compartido).then((h) => h.jsonValue());
   };
   await page.goto('/');
@@ -510,6 +516,7 @@ test('las hojas de opciones se cierran tocando fuera', async ({ page }) => {
 function nubeFalsa() {
   const viajes = new Map();
   const salas = new Map();
+  const presencias = new Map();
   let n = 0;
   const instalar = async (contexto) => {
     await contexto.route('https://centngtgakviminnkkva.supabase.co/rest/v1/rpc/*', (route) => {
@@ -527,17 +534,35 @@ function nubeFalsa() {
       return route.fulfill({ json: v.version });
     });
     await contexto.routeWebSocket(/supabase\.co\/realtime/, (ws) => {
+      const claves = new Map();
+      const atodos = (topic, event, payload) => { for (const otro of salas.get(topic) ?? []) otro.send(JSON.stringify({ topic, event, payload })); };
+      const salir = (topic) => {
+        const clave = claves.get(topic);
+        const meta = presencias.get(topic)?.get(clave);
+        if (!meta) return;
+        presencias.get(topic).delete(clave);
+        atodos(topic, 'presence_diff', { joins: {}, leaves: { [clave]: { metas: [meta] } } });
+      };
       ws.onMessage((mensaje) => {
         const { topic, event, payload, ref } = JSON.parse(mensaje);
         if (event === 'phx_join') {
           if (!salas.has(topic)) salas.set(topic, new Set());
+          if (!presencias.has(topic)) presencias.set(topic, new Map());
           salas.get(topic).add(ws);
+          claves.set(topic, payload.config.presence.key);
           ws.send(JSON.stringify({ topic, event: 'phx_reply', payload: { status: 'ok', response: {} }, ref }));
+          ws.send(JSON.stringify({ topic, event: 'presence_state', payload: Object.fromEntries([...presencias.get(topic)].map(([c, m]) => [c, { metas: [m] }])) }));
         }
         if (event === 'broadcast') {
           for (const otro of salas.get(topic) ?? []) if (otro !== ws) otro.send(JSON.stringify({ topic, event, payload }));
         }
+        if (event === 'presence' && payload.event === 'track') {
+          presencias.get(topic).set(claves.get(topic), payload.payload);
+          atodos(topic, 'presence_diff', { joins: { [claves.get(topic)]: { metas: [payload.payload] } }, leaves: {} });
+        }
+        if (event === 'presence' && payload.event === 'untrack') salir(topic);
       });
+      ws.onClose(() => { for (const topic of claves.keys()) { salir(topic); salas.get(topic)?.delete(ws); } });
     });
   };
   return { viajes, instalar };
@@ -561,6 +586,8 @@ test('un viaje compartido se sincroniza solo entre dos móviles', async ({ brows
   await a.goto('/');
   await a.getByText('Roma', { exact: true }).click();
   await a.getByRole('button', { name: 'Compartir viaje' }).click();
+  await a.getByRole('button', { name: 'Enviar enlace' }).click();
+  await a.keyboard.press('Escape');
   const url = await a.waitForFunction(() => window.compartido).then((h) => h.jsonValue());
   expect(url).toMatch(/\/#v=prueba0001$/);
   await expect(a.getByText('Roma, Italia · 2 días · ☁️ compartido')).toBeVisible();
@@ -598,7 +625,125 @@ test('sin conexión con la nube, compartir usa el enlace largo', async ({ page }
   await page.goto('/');
   await page.getByText('Roma', { exact: true }).click();
   await page.getByRole('button', { name: 'Compartir viaje' }).click();
+  await expect(page.getByText(/copia del viaje que no se actualizará sola/)).toBeVisible();
+  await page.getByRole('button', { name: 'Enviar enlace' }).click();
+  await page.keyboard.press('Escape');
   const url = await page.waitForFunction(() => window.compartido).then((h) => h.jsonValue());
   expect(url).toMatch(/#viaje=[\w-]+$/);
-  await expect(page.getByText(/copia del viaje que no se actualizará sola/)).toBeVisible();
+});
+
+test('cambios a la vez en dos móviles se juntan y se avisa de quién cambió qué', async ({ browser }) => {
+  const falsa = nubeFalsa();
+  const [movilA, movilB] = await Promise.all([browser.newContext(), browser.newContext()]);
+  await falsa.instalar(movilA);
+  await falsa.instalar(movilB);
+  const a = await movilA.newPage();
+  const b = await movilB.newPage();
+  await sinRed(a, { nube: true });
+  await sinRed(b, { nube: true });
+  a.on('dialog', (d) => d.accept('Santi'));
+  b.on('dialog', (d) => d.accept());
+  await b.addInitScript(() => localStorage.setItem('rumbo-nombre', 'Marta'));
+  await a.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
+  await sembrar(a, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
+  await a.goto('/');
+  await a.getByText('Roma', { exact: true }).click();
+  await a.getByRole('button', { name: 'Compartir viaje' }).click();
+  await a.getByRole('button', { name: 'Enviar enlace' }).click();
+  await a.keyboard.press('Escape');
+  const url = await a.waitForFunction(() => window.compartido).then((h) => h.jsonValue());
+  await b.goto(url);
+  await expect(b.getByRole('heading', { name: 'Roma' })).toBeVisible();
+
+  // Casi a la vez: Marta añade un consejo y Santi quita el Panteón.
+  await b.getByRole('button', { name: /Notas y consejos/ }).click();
+  await b.getByRole('button', { name: '+ Consejo' }).click();
+  await b.getByLabel('Consejo', { exact: true }).fill('Supplì en Trastevere');
+  await b.getByRole('button', { name: 'Guardar' }).click();
+  await a.getByRole('button', { name: 'Quitar Panteón' }).click();
+
+  await expect.poll(() => {
+    const d = falsa.viajes.get('prueba0001').datos;
+    return `${d.consejos.length} consejo, ${d.lugares.map((l) => l.nombre).join('+')}`;
+  }, { timeout: 15000 }).toBe('1 consejo, Coliseo');
+  await expect(a.locator('#aviso')).toContainText('Marta ha añadido 1 consejo en «Roma»');
+  // Mientras Marta está en Notas y consejos del mismo viaje, Santi la ve dentro.
+  await expect(a.locator('#presentes')).toHaveText(' · 👀 Marta también está aquí');
+  await expect(a.getByRole('button', { name: /Notas y consejos.*1 consejo/ })).toBeVisible({ timeout: 10000 });
+  await b.getByRole('button', { name: '‹ Roma' }).click();
+  await expect(b.locator('.parada', { hasText: 'Panteón' })).toHaveCount(0, { timeout: 10000 });
+  await expect(a.locator('#estado-nube')).toHaveText('al día');
+  // Marta vuelve a la lista de viajes: ya no está dentro.
+  await b.getByRole('button', { name: '‹ Viajes' }).click();
+  await expect(a.locator('#presentes')).toHaveText('');
+  await movilA.close();
+  await movilB.close();
+});
+
+test('compartir enseña el QR y el enlace', async ({ page }) => {
+  await sinRed(page);
+  // La librería del QR viene de un CDN: en la prueba se sirve la misma copia desde el disco.
+  await page.route('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js', (r) => r.fulfill({ path: 'pruebas/qrcode-1.4.4.js', headers: { 'access-control-allow-origin': '*', 'content-type': 'text/javascript' } }));
+  await sembrar(page, [viaje()]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Compartir viaje' }).click();
+  const hoja = page.getByRole('dialog', { name: 'Compartir «Roma»' });
+  await expect(hoja.locator('#qr svg')).toBeVisible();
+  await expect(hoja.locator('#compartir-enlace')).toHaveText(/#viaje=/);
+  await page.mouse.click(10, 10);
+  await expect(hoja).toBeHidden();
+});
+
+test('los lugares que el asistente no pudo situar los sitúa la app al abrir el viaje', async ({ browser }) => {
+  const falsa = nubeFalsa();
+  const movil = await browser.newContext();
+  await falsa.instalar(movil);
+  falsa.viajes.set('asistente0001', { version: 1, datos: {
+    nombre: 'Oporto', destino: 'Oporto, Portugal', dias: 2, zona: { lat: 41.15, lon: -8.61, radio: 15 }, lugares: [], hoteles: [],
+    editadoPor: 'Asistente IA', porSituar: [{ nombre: 'Torre dos Clérigos' }, { nombre: 'Ponte Luís I' }, { nombre: 'Sitio inexistente' }],
+  } });
+  const page = await movil.newPage();
+  await sinRed(page, { nube: true });
+  await page.route('https://photon.komoot.io/**', (route) => {
+    const q = new URL(route.request().url()).searchParams.get('q');
+    const sitios = { 'Torre dos Clérigos': [-8.6146, 41.1458], 'Ponte Luís I': [-8.6094, 41.1399] };
+    const c = sitios[q];
+    return route.fulfill({ json: { features: c ? [{ properties: { name: q, city: 'Porto' }, geometry: { coordinates: c } }] : [] } });
+  });
+  page.on('dialog', (d) => d.accept());
+  await page.goto('/#v=asistente0001');
+  await expect(page.locator('.parada', { hasText: 'Torre dos Clérigos' })).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.parada', { hasText: 'Ponte Luís I' })).toBeVisible();
+  await expect.poll(() => falsa.viajes.get('asistente0001').datos.porSituar?.length ?? 0, { timeout: 10000 }).toBe(0);
+  const lugares = falsa.viajes.get('asistente0001').datos.lugares;
+  expect(lugares.map((l) => l.nombre).sort()).toEqual(['Ponte Luís I', 'Torre dos Clérigos']);
+  expect(lugares.every((l) => l.dia >= 1)).toBe(true);
+  await movil.close();
+});
+
+test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje()], { novedadesVistas: false });
+  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '10'); sessionStorage.setItem('vista', '1'); } });
+  await page.goto('/');
+  const ventana = page.getByRole('dialog', { name: /Novedades de Rumbo/ });
+  await expect(ventana).toBeVisible();
+  await expect(ventana).toContainText('juntan los cambios de los dos');
+  await expect(ventana).not.toContainText('enlace corto');
+  await ventana.getByRole('button', { name: 'Entendido' }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
+  await expect(ventana).toBeHidden();
+  // Desde Ajustes se pueden volver a ver.
+  await page.getByRole('button', { name: 'Ajustes' }).click();
+  await page.getByRole('button', { name: 'Ver novedades' }).click();
+  await expect(ventana).toContainText('enlace corto');
+});
+
+test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {
+  await sinRed(page);
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: /Novedades/ })).toBeHidden();
 });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje, adivinarCategoria, mejorHueco, ordenarDias, agenda, hora, minutosTramo, datosNube } from './logica.js';
+import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje, adivinarCategoria, mejorHueco, ordenarDias, agenda, hora, minutosTramo, datosNube, fusionar, resumenCambios } from './logica.js';
 
 assert.deepEqual(
   extraerLugares('Lo mejor de Roma 😍\n📍 Trattoria Da Enzo - la mejor pasta\n📍Panteón 📍 Coliseo (reserva!)\n#roma #viajes'),
@@ -171,6 +171,8 @@ assert.equal(adivinarCategoria('Gelateria del Teatro'), 'helado');
 assert.equal(adivinarCategoria('Miradouro da Graça'), 'mirador');
 assert.equal(adivinarCategoria('Panteón'), 'monumento');
 assert.equal(adivinarCategoria('Castel Sant Angelo'), 'monumento');
+assert.equal(adivinarCategoria('Jardins do Palácio de Cristal'), 'naturaleza');
+assert.equal(adivinarCategoria('Livraria Lello'), 'compras');
 assert.equal(adivinarCategoria('Barcelona'), 'otro');
 assert.equal(validarViajes({ viajes: [{ lugares: [{ nombre: 'Basílica de San Pedro', lat: 41.9, lon: 12.45 }] }] })[0].lugares[0].tipo, 'monumento');
 
@@ -215,6 +217,36 @@ assert.equal(pragaRecibida.zona.lat, 50.08804);
 
 // Viajes compartidos: lo que es de cada móvil no se sube, y el código de la nube se valida.
 const compartido = validarViajes({ viajes: [{ id: 'local', nombre: 'Roma', dias: 2, ocultos: [1], nube: { id: '4f773d3134004bd3', version: 3 }, lugares: [] }] })[0];
-assert.deepEqual(compartido.nube, { id: '4f773d3134004bd3', version: 3, pendiente: false });
+assert.deepEqual(compartido.nube, { id: '4f773d3134004bd3', version: 3, pendiente: false, base: null });
 assert.deepEqual(Object.keys(datosNube(compartido)).filter((k) => ['id', 'nube', 'ocultos'].includes(k)), []);
 assert.equal(validarViajes({ viajes: [{ lugares: [], nube: { id: '../otra', version: 1 } }] })[0].nube, null);
+
+{
+// Juntar cambios hechos a la vez en dos móviles.
+const L = (id, extra = {}) => ({ id, nombre: id, dia: 1, ...extra });
+const comun = { nombre: 'Roma', dias: 3, notasDia: {}, lugares: [L('a'), L('b'), L('c')], consejos: [{ id: 'k1', texto: 'uno' }] };
+// Yo muevo «b» al día 2 y añado «d»; la otra persona añade un consejo, quita «c» y cambia el nombre.
+const miaV = { ...comun, lugares: [L('a'), L('b', { dia: 2 }), L('c'), L('d')] };
+const suyaV = { ...comun, nombre: 'Roma en mayo', lugares: [L('a'), L('b')], consejos: [...comun.consejos, { id: 'k2', texto: 'dos' }] };
+const junto = fusionar(comun, miaV, suyaV);
+assert.equal(junto.nombre, 'Roma en mayo');
+assert.deepEqual(junto.lugares.map((l) => `${l.id}${l.dia}`), ['a1', 'b2', 'd1']);
+assert.deepEqual(junto.consejos.map((c) => c.id), ['k1', 'k2']);
+// Los dos tocan la misma parada en campos distintos: se quedan los dos cambios.
+const dosCampos = fusionar(comun, { ...comun, lugares: [L('a', { nota: 'mía' }), L('b'), L('c')] }, { ...comun, lugares: [L('a', { estancia: 90 }), L('b'), L('c')] });
+assert.deepEqual(dosCampos.lugares[0], L('a', { nota: 'mía', estancia: 90 }));
+// El orden lo pone quien reordena, y lo nuevo del otro va detrás de su vecino.
+const orden = fusionar(comun, { ...comun, lugares: [L('c'), L('b'), L('a')] }, { ...comun, lugares: [L('a'), L('x'), L('b'), L('c')] });
+assert.deepEqual(orden.lugares.map((l) => l.id), ['c', 'b', 'a', 'x']);
+assert.equal(fusionar(null, miaV, suyaV), miaV);
+assert.equal(resumenCambios(comun, suyaV), 'ha quitado 1 lugar y ha añadido 1 consejo');
+assert.equal(resumenCambios(comun, { ...comun, nombre: 'Otro' }), 'ha cambiado el viaje');
+}
+
+// La versión de la caché y la de las novedades van juntas: si no, no sale el aviso de actualización o sale mal.
+{
+  const { readFileSync } = await import('node:fs');
+  const { NOVEDADES } = await import('./novedades.js');
+  assert.match(readFileSync(new URL('./sw.js', import.meta.url), 'utf8'), new RegExp(`const CACHE = 'rumbo-${NOVEDADES[0].version}';`));
+  assert.ok(NOVEDADES.every((n, i) => !i || n.version < NOVEDADES[i - 1].version));
+}

@@ -77,6 +77,7 @@
 <dialog id="dlg-ajustes" aria-labelledby="ajustes-titulo">
   <form method="dialog" id="form-ajustes">
     <h2 id="ajustes-titulo" tabindex="-1" autofocus>Ajustes</h2>
+    <label>Tu nombre <input name="nombre" maxlength="40" placeholder="Para los viajes compartidos" autocomplete="given-name"></label>
     <label>Apariencia
       <select name="tema">
         <option value="">Automática (como el sistema)</option>
@@ -99,7 +100,7 @@
     <fieldset>
       <legend>Actualizaciones</legend>
       <p class="tenue" id="version"></p>
-      <div class="fila"><button type="button" class="suave" id="buscar-version">Buscar actualizaciones</button></div>
+      <div class="fila"><button type="button" class="suave" id="buscar-version">Buscar actualizaciones</button><button type="button" class="texto" id="ver-novedades">Ver novedades</button></div>
     </fieldset>
     <div class="fila"><button class="fuerte">Listo</button></div>
   </form>
@@ -114,6 +115,24 @@
     <div id="comer-lista"></div>
     <p><small>Sitios de OpenStreetMap. Se añaden a la ruta donde menos te desvías.</small></p>
     <div class="fila pie"><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte" id="anadir-comer" disabled>Añadir a la ruta</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-compartir" aria-labelledby="compartir-titulo">
+  <form method="dialog">
+    <h2 id="compartir-titulo" tabindex="-1" autofocus>Compartir viaje</h2>
+    <p class="tenue" id="compartir-texto"></p>
+    <div id="qr" class="qr" role="img" aria-label="Código QR del enlace del viaje"></div>
+    <p class="enlace-compartir" id="compartir-enlace"></p>
+    <div class="fila"><button type="button" class="suave" id="copiar-enlace">Copiar</button><button type="button" class="fuerte" id="enviar-enlace">Enviar enlace</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-novedades" aria-labelledby="novedades-titulo">
+  <form method="dialog">
+    <h2 id="novedades-titulo" tabindex="-1" autofocus>✨ Novedades de Rumbo</h2>
+    <div id="lista-novedades" class="novedades"></div>
+    <div class="fila"><button class="fuerte">Entendido</button></div>
   </form>
 </dialog>
 

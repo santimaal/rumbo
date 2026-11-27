@@ -340,38 +340,73 @@ export const nube = {
 
 // Avisos al instante entre móviles con Supabase Realtime: un canal por viaje, por WebSocket y sin librerías.
 const canales = new Map();
+const presentes = new Map();
+let enViaje = null;
 let socket = null;
 let latido;
 let referencia = 0;
 const enviar = (topic, event, payload) => {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ topic, event, payload, ref: String(++referencia) }));
 };
-const unirse = (id) => enviar(`realtime:viaje-${id}`, 'phx_join', { config: { broadcast: { self: false }, presence: { key: '' }, private: false } });
+// Cada móvil se identifica en la presencia con un código propio que no cambia.
+const DISPOSITIVO = (() => {
+  let id = localStorage.getItem('rumbo-dispositivo');
+  if (!id) localStorage.setItem('rumbo-dispositivo', (id = crypto.randomUUID()));
+  return id;
+})();
+const unirse = (id) => enviar(`realtime:viaje-${id}`, 'phx_join', { config: { broadcast: { self: false }, presence: { key: DISPOSITIVO, enabled: true }, private: false } });
+const marcar = (id, evento, nombre) => enviar(`realtime:viaje-${id}`, 'presence', { type: 'presence', event: evento, ...(nombre === undefined ? {} : { payload: { nombre } }) });
+
+/** Avisa de quién más tiene abierto el viaje, sin contar este móvil. */
+function avisarPresentes(id) {
+  const otros = [...(presentes.get(id) ?? new Map())].filter(([clave]) => clave !== DISPOSITIVO).map(([, nombre]) => nombre || 'Alguien');
+  canales.get(id)?.alPresencia?.(otros);
+}
 
 function conectar() {
   if (socket && socket.readyState <= WebSocket.OPEN) return;
   socket = new WebSocket(`${SUPABASE.replace('https', 'wss')}/realtime/v1/websocket?apikey=${CLAVE_SUPABASE}&vsn=1.0.0`);
   socket.onopen = () => {
     for (const id of canales.keys()) unirse(id);
+    if (enViaje) marcar(enViaje.id, 'track', enViaje.nombre);
     latido = setInterval(() => enviar('phoenix', 'heartbeat', {}), 25000);
   };
   socket.onmessage = (m) => {
-    const { topic, event } = JSON.parse(m.data);
-    if (event === 'broadcast') canales.get(topic.replace('realtime:viaje-', ''))?.();
+    const { topic, event, payload } = JSON.parse(m.data);
+    const id = topic.replace('realtime:viaje-', '');
+    if (event === 'broadcast') canales.get(id)?.alCambiar();
+    if (event === 'presence_state') presentes.set(id, new Map(Object.entries(payload).map(([clave, { metas }]) => [clave, metas[0]?.nombre])));
+    if (event === 'presence_diff') {
+      const lista = presentes.get(id) ?? new Map();
+      for (const [clave, { metas }] of Object.entries(payload.joins)) lista.set(clave, metas[0]?.nombre);
+      for (const clave of Object.keys(payload.leaves)) lista.delete(clave);
+      presentes.set(id, lista);
+    }
+    if (event.startsWith('presence_')) avisarPresentes(id);
   };
   // Sin conexión se reintenta cada poco; al volver, cada viaje se pone al día por su cuenta.
   socket.onclose = () => {
     clearInterval(latido);
+    presentes.clear();
+    for (const id of canales.keys()) avisarPresentes(id);
     if (canales.size) setTimeout(conectar, 15000);
   };
 }
 
-/** Llama a `alCambiar` cada vez que otro móvil avise de que el viaje ha cambiado. */
-export function escucharViaje(id, alCambiar) {
+/** Llama a `alCambiar` cuando otro móvil avisa de un cambio y a `alPresencia` con quién más lo tiene abierto. */
+export function escucharViaje(id, alCambiar, alPresencia) {
   const nuevo = !canales.has(id);
-  canales.set(id, alCambiar);
+  canales.set(id, { alCambiar, alPresencia });
   conectar();
   if (nuevo) unirse(id);
+}
+
+/** Dice a los demás qué viaje compartido tiene abierto este móvil (null si ninguno). */
+export function estarEn(id, nombre) {
+  if (enViaje?.id === id && enViaje?.nombre === nombre) return;
+  if (enViaje) marcar(enViaje.id, 'untrack');
+  enViaje = id ? { id, nombre } : null;
+  if (id) marcar(id, 'track', nombre);
 }
 
 export const avisarCambio = (id) => enviar(`realtime:viaje-${id}`, 'broadcast', { type: 'broadcast', event: 'cambio', payload: {} });

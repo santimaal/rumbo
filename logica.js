@@ -411,8 +411,8 @@ const PISTAS = [
   ['cafe', /\b(cafe|caffe|coffee|cafeteria|pasteleria|pastelaria|bakery|panaderia|brunch|churreria|pasticceria)\b/],
   ['copas', /\b(bar|pub|cocktails?|coctel\w*|rooftop|taberna|vinoteca|wine)\b/],
   ['comida', /\b(restaurante?|ristorante|trattoria|osteria|pizzeria|tasca|marisqueria|asador|sushi|burger|tapas|comida|food|bistro|brasserie|taqueria|mercado|market|mercato)\b/],
-  ['naturaleza', /\b(parque|park|parco|jardin|jardines|garden|giardino|jardim|playa|beach|spiaggia|praia|lago|lake|bosque|monte)\b/],
-  ['compras', /\b(tienda|shop|store|outlet|boutique|mall|centro comercial)\b/],
+  ['naturaleza', /\b(parque|park|parco|jardin|jardines|jardins|garden|gardens|giardino|giardini|jardim|playa|beach|spiaggia|praia|lago|lake|bosque|monte)\b/],
+  ['compras', /\b(tienda|shop|store|outlet|boutique|mall|centro comercial|libreria|livraria|bookshop|bookstore)\b/],
   ['monumento', /\b(catedral|cathedral|basilica|iglesia|church|chiesa|igreja|templo|temple|palacio|palace|palazzo|palacio|castillo|castle|castel|castello|castelo|chateau|torre|tower|puente|bridge|ponte|plaza|piazza|praca|square|coliseo|colosseo|fontana|fuente|arco|monumento|monument|ruinas|foro|panteon|pantheon|alhambra|mezquita|mosque|muralla)\b/],
 ];
 
@@ -520,8 +520,21 @@ export function validarViajes(datos) {
       nota: texto(v.nota, NOTA),
       notasDia: notasValidas(v.notasDia),
       // Viaje compartido en la nube: su código y la última versión que se conoce.
+      // `base` es lo último que había en la nube y aquí a la vez: con ella se sabe qué ha cambiado cada uno.
       nube: /^[a-z0-9]{8,40}$/.test(v.nube?.id ?? '') && Number.isInteger(v.nube.version)
-        ? { id: v.nube.id, version: v.nube.version, pendiente: v.nube.pendiente === true } : null,
+        ? {
+          id: v.nube.id, version: v.nube.version, pendiente: v.nube.pendiente === true,
+          base: v.nube.base && typeof v.nube.base === 'object' && !Array.isArray(v.nube.base) ? v.nube.base : null,
+        } : null,
+      editadoPor: texto(v.editadoPor, 40),
+      // Lugares que alguien añadió sin poder situarlos en el mapa (el asistente de IA): los sitúa el móvil al abrir el viaje.
+      porSituar: (Array.isArray(v.porSituar) ? v.porSituar : []).filter((l) => texto(l?.nombre).trim()).slice(0, 40).map((l) => ({
+        nombre: texto(l.nombre).trim(),
+        dia: Number.isInteger(l.dia) && l.dia >= 1 && l.dia <= dias ? l.dia : 0,
+        tipo: CATEGORIAS.some((c) => c.id === l.tipo) ? l.tipo : '',
+        nota: texto(l.nota, NOTA),
+        estancia: Number.isInteger(l.estancia) && l.estancia >= 5 && l.estancia <= 600 ? l.estancia : 0,
+      })),
       consejos: consejosValidos(v.consejos),
       // Días que no se muestran; por defecto se ven todos.
       ocultos: [...new Set(Array.isArray(v.ocultos) ? v.ocultos : [])].filter((d) => Number.isInteger(d) && d >= 0 && d <= dias),
@@ -570,4 +583,73 @@ export function actualizarViaje(mio, recibido) {
 export function datosNube(v) {
   const { id, nube, ocultos, ...resto } = v;
   return resto;
+}
+
+const igual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/** Cada campo se queda con el lado que lo cambió desde `base`; si cambiaron los dos, con el mío. */
+function fusionarCampos(base = {}, mia = {}, suya = {}) {
+  const r = {};
+  for (const k of new Set([...Object.keys(mia), ...Object.keys(suya)])) {
+    const valor = igual(mia[k], base[k]) ? suya[k] : mia[k];
+    if (valor !== undefined) r[k] = valor;
+  }
+  return r;
+}
+
+/** Une dos listas de piezas con identificador (lugares, consejos) cambiadas a la vez desde `base`. */
+function fusionarLista(base = [], mia = [], suya = []) {
+  const porId = (l) => new Map(l.map((x) => [x.id, x]));
+  const [b, m, s] = [porId(base), porId(mia), porId(suya)];
+  const juntas = new Map();
+  for (const id of new Set([...m.keys(), ...s.keys()])) {
+    const [enBase, enMia, enSuya] = [b.get(id), m.get(id), s.get(id)];
+    // Lo que borra cualquiera se borra; lo nuevo de un lado se queda.
+    if (enBase && (!enMia || !enSuya)) continue;
+    if (!enMia || !enSuya) juntas.set(id, enMia ?? enSuya);
+    else juntas.set(id, enBase ? fusionarCampos(enBase, enMia, enSuya) : enMia);
+  }
+  // El orden lo pone quien haya reordenado; lo nuevo del otro lado va detrás de la pieza que tenía delante.
+  const comunes = (l) => l.map((x) => x.id).filter((id) => b.has(id) && juntas.has(id));
+  const reordenada = (l) => !igual(comunes(l), comunes(base));
+  const [primera, segunda] = reordenada(mia) || !reordenada(suya) ? [mia, suya] : [suya, mia];
+  const orden = primera.map((x) => x.id).filter((id) => juntas.has(id));
+  segunda.forEach((x, i) => {
+    if (!juntas.has(x.id) || orden.includes(x.id)) return;
+    const delante = segunda.slice(0, i).reverse().find((y) => orden.includes(y.id));
+    orden.splice(delante ? orden.indexOf(delante.id) + 1 : 0, 0, x.id);
+  });
+  return orden.map((id) => juntas.get(id));
+}
+
+/**
+ * Junta los cambios de dos móviles hechos a la vez sobre el mismo viaje compartido. `base` es la versión que
+ * tenían los dos en común; sin ella no se puede saber quién cambió qué y se queda lo propio.
+ */
+export function fusionar(base, mia, suya) {
+  if (!base) return mia;
+  return {
+    ...fusionarCampos(base, mia, suya),
+    notasDia: fusionarCampos(base.notasDia, mia.notasDia, suya.notasDia),
+    lugares: fusionarLista(base.lugares, mia.lugares, suya.lugares),
+    consejos: fusionarLista(base.consejos, mia.consejos, suya.consejos),
+  };
+}
+
+/** Qué ha cambiado otra persona, en pocas palabras: "ha añadido 2 lugares y ha quitado 1 consejo". */
+export function resumenCambios(antes, despues) {
+  const ids = (l) => new Set((l ?? []).map((x) => x.id));
+  const cuenta = (k) => {
+    const [a, d] = [ids(antes?.[k]), ids(despues?.[k])];
+    return [[...d].filter((x) => !a.has(x)).length, [...a].filter((x) => !d.has(x)).length];
+  };
+  const n = (num, uno, varios) => `${num} ${num === 1 ? uno : varios}`;
+  const [masL, menosL] = cuenta('lugares');
+  const [masC, menosC] = cuenta('consejos');
+  const partes = [
+    masL && `ha añadido ${n(masL, 'lugar', 'lugares')}`, menosL && `ha quitado ${n(menosL, 'lugar', 'lugares')}`,
+    masC && `ha añadido ${n(masC, 'consejo', 'consejos')}`, menosC && `ha quitado ${n(menosC, 'consejo', 'consejos')}`,
+  ].filter(Boolean);
+  if (!partes.length) return 'ha cambiado el viaje';
+  return partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(', ')} y ${partes.at(-1)}`;
 }

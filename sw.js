@@ -1,6 +1,7 @@
-const CACHE = 'rumbo-10';
+const CACHE = 'rumbo-11';
 const MAPLIBRE = 'https://unpkg.com/maplibre-gl@5.24.1/dist/';
-const ARCHIVOS = ['./', 'estilo.css', 'app.js', 'logica.js', 'fuentes.js', 'manifest.webmanifest', 'icono-180.png', `${MAPLIBRE}maplibre-gl.js`, `${MAPLIBRE}maplibre-gl.css`];
+const QR = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+const ARCHIVOS = ['./', 'estilo.css', 'app.js', 'logica.js', 'fuentes.js', 'novedades.js', 'manifest.webmanifest', 'icono-180.png', `${MAPLIBRE}maplibre-gl.js`, `${MAPLIBRE}maplibre-gl.css`];
 
 // cache: 'reload' salta la caché HTTP para no guardar los archivos de la versión anterior.
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARCHIVOS.map((a) => new Request(a, { cache: 'reload' }))))));
@@ -17,7 +18,7 @@ self.addEventListener('message', (e) => {
 // Red primero para recibir cambios; la copia local solo se usa sin conexión.
 self.addEventListener('fetch', (e) => {
   const { url, method } = e.request;
-  if (method !== 'GET' || !(url.startsWith(self.registration.scope) || url.startsWith(MAPLIBRE))) return;
+  if (method !== 'GET' || !(url.startsWith(self.registration.scope) || url.startsWith(MAPLIBRE) || url === QR)) return;
   e.respondWith(fetch(e.request).then(async (r) => {
     if (r.ok) await caches.open(CACHE).then((c) => c.put(e.request, r.clone()));
     return r;

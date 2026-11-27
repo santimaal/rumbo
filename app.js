@@ -2,11 +2,12 @@ import {
   extraerLugares, parecido, organizar, distanciaKm, largo, extremosDelDia, minutosUtiles, enlaceLugar, enlacesRuta,
   enlaceSeguro, fotoDe, diasValidos, validarViajes, TIPOS_CONSEJO, coincide, tramosRuta, claveRuta, duracion, horarioDelDia, tiempoDe, bandera,
   empaquetar, desempaquetar, mismoViaje, actualizarViaje, CATEGORIAS, adivinarCategoria, mejorHueco,
-  ordenarDias, estanciaDe, minutosTramo, hora, agenda, datosNube,
+  ordenarDias, estanciaDe, minutosTramo, hora, agenda, datosNube, fusionar, resumenCambios,
 } from './logica.js';
 import {
-  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, buscarHorarios, prevision, buscarComida, nube, escucharViaje, avisarCambio,
+  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, buscarHorarios, prevision, buscarComida, nube, escucharViaje, avisarCambio, estarEn,
 } from './fuentes.js';
+import { NOVEDADES } from './novedades.js';
 
 const CLAVE = 'rumbo';
 // Tonos oscuros para que el número blanco se lea encima.
@@ -45,63 +46,121 @@ function persistir() {
   }
 }
 
+const igual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const tieneCambios = (v) => v.nube && !igual(datosNube(v), v.nube.base);
+// La base se guarda aparte: si compartiera listas con el viaje, cambiaría con él y no se notaría nada.
+const copiaNube = (v) => structuredClone(datosNube(v));
+
 function guardar() {
-  for (const v of viajes) if (v.nube && sincronizado.get(v.id) !== JSON.stringify(datosNube(v))) programarSubida(v);
+  for (const v of viajes) if (tieneCambios(v)) programarSubida(v);
   persistir();
   pintar();
 }
 
 // ===== Viajes compartidos
-// Lo último enviado o recibido de cada viaje compartido, para subir solo cuando algo cambia de verdad.
-const sincronizado = new Map();
+const CLAVE_NOMBRE = 'rumbo-nombre';
+const miNombre = () => localStorage.getItem(CLAVE_NOMBRE) ?? '';
 const subidas = new Map();
+const subiendo = new Set();
+const estados = new Map();
+const TEXTO_ESTADO = {
+  'al-dia': 'al día', guardando: 'guardando…', pendiente: 'cambios sin subir', 'sin-conexion': 'sin conexión, se subirá al volver',
+};
+
+/** Muestra cómo va la sincronización sin repintar la pantalla (repintar mueve el mapa). */
+function ponerEstado(v, estado) {
+  estados.set(v.id, estado);
+  if (abierto === v.id && $('estado-nube')) $('estado-nube').textContent = TEXTO_ESTADO[estado];
+}
 
 function programarSubida(v) {
   v.nube.pendiente = true;
+  ponerEstado(v, 'pendiente');
   clearTimeout(subidas.get(v.id));
   subidas.set(v.id, setTimeout(() => subir(v.id), 1500));
+}
+
+/**
+ * Pone en el viaje la versión de la nube. Si aquí había cambios sin subir, junta los de los dos
+ * a partir de la última versión común; si no, se queda la de la nube tal cual.
+ */
+function aplicarRemoto(v, actual) {
+  const codigo = v.nube.id;
+  const baseAntes = v.nube.base;
+  const mia = datosNube(v);
+  const suya = datosNube(validarViajes({ viajes: [{ lugares: [], ...actual.datos, id: v.id }] })[0]);
+  const propios = !igual(mia, baseAntes);
+  const [final] = validarViajes({ viajes: [{ ...(propios ? fusionar(baseAntes, mia, suya) : suya), id: v.id }] });
+  actualizarViaje(v, final);
+  v.nube = { id: codigo, version: actual.version, pendiente: propios, base: structuredClone(suya) };
+  return { suya, baseAntes };
+}
+
+function avisarDeOtro(v, { suya, baseAntes }) {
+  if (suya.editadoPor !== miNombre() || !miNombre()) avisar(`${suya.editadoPor || 'Alguien'} ${resumenCambios(baseAntes, suya)} en «${v.nombre}».`);
 }
 
 async function subir(id) {
   subidas.delete(id);
   const v = viajes.find((x) => x.id === id);
-  if (!v?.nube) return;
-  const datos = datosNube(v);
+  if (!v?.nube || subiendo.has(id)) return;
+  subiendo.add(id);
+  ponerEstado(v, 'guardando');
   try {
-    let version = await nube.guardar(v.nube.id, datos, v.nube.version);
-    // Si el otro móvil guardó antes, gana el último cambio: el nuestro.
+    v.editadoPor = miNombre();
+    let version = await nube.guardar(v.nube.id, datosNube(v), v.nube.version);
+    // El otro móvil guardó antes: se juntan los cambios de los dos y se vuelve a guardar.
     if (version === null) {
       const actual = await nube.leer(v.nube.id);
       if (!actual) return;
-      version = await nube.guardar(v.nube.id, datos, actual.version);
+      avisarDeOtro(v, aplicarRemoto(v, actual));
+      version = await nube.guardar(v.nube.id, datosNube(v), actual.version);
+      pintar();
     }
     if (version === null) {
       programarSubida(v);
       return;
     }
-    Object.assign(v.nube, { version, pendiente: false });
-    sincronizado.set(v.id, JSON.stringify(datos));
+    v.nube = { ...v.nube, version, pendiente: false, base: copiaNube(v) };
     persistir();
+    ponerEstado(v, 'al-dia');
     avisarCambio(v.nube.id);
-  } catch { /* sin conexión: queda pendiente y se sube al volver la conexión */ }
+  } catch {
+    ponerEstado(v, 'sin-conexion');
+  } finally {
+    subiendo.delete(id);
+  }
 }
 
-/** Trae la versión de la nube si es más nueva y no hay cambios propios sin subir. */
+/** Trae la versión de la nube si es más nueva, junta lo que haya aquí sin subir y avisa de quién cambió qué. */
 async function bajar(id) {
   const v = viajes.find((x) => x.id === id);
-  if (!v?.nube || v.nube.pendiente || subidas.has(id)) return;
+  if (!v?.nube || subidas.has(id) || subiendo.has(id)) return;
   const actual = await nube.leer(v.nube.id).catch(() => null);
-  if (!actual || actual.version <= v.nube.version || v.nube.pendiente) return;
-  const codigo = v.nube.id;
-  const [recibido] = validarViajes({ viajes: [{ lugares: [], ...actual.datos, id: v.id }] });
-  actualizarViaje(v, recibido);
-  v.nube = { id: codigo, version: actual.version, pendiente: false };
-  sincronizado.set(v.id, JSON.stringify(datosNube(v)));
+  if (!actual || actual.version <= v.nube.version || subiendo.has(id)) return;
+  avisarDeOtro(v, aplicarRemoto(v, actual));
   guardar();
+  if (!v.nube.pendiente) ponerEstado(v, 'al-dia');
 }
 
+const presentes = new Map();
+const textoPresentes = (nombres) => {
+  if (!nombres?.length) return '';
+  const quien = nombres.length === 1 ? nombres[0] : `${nombres.slice(0, -1).join(', ')} y ${nombres.at(-1)}`;
+  return ` · 👀 ${quien} ${nombres.length === 1 ? 'también está aquí' : 'también están aquí'}`;
+};
+
 function escuchar(v) {
-  escucharViaje(v.nube.id, () => bajar(v.id));
+  escucharViaje(v.nube.id, () => bajar(v.id), (nombres) => {
+    presentes.set(v.id, nombres);
+    if (abierto === v.id && $('presentes')) $('presentes').textContent = textoPresentes(nombres);
+  });
+}
+
+/** Cuenta a los demás qué viaje compartido está abierto aquí, solo mientras la app está a la vista. */
+function anunciarPresencia() {
+  const v = viajes.find((x) => x.id === abierto);
+  estarEn(v?.nube && document.visibilityState === 'visible' ? v.nube.id : null, miNombre());
 }
 
 /** Al abrir o volver a la app: sube lo pendiente y trae lo que hayan cambiado los demás. */
@@ -114,12 +173,17 @@ function ponerAlDia() {
 
 function iniciarNube() {
   for (const v of viajes.filter((x) => x.nube)) {
-    sincronizado.set(v.id, v.nube.pendiente ? '' : JSON.stringify(datosNube(v)));
+    // Los compartidos antes de guardar la base parten de lo que hay ahora.
+    if (!v.nube.base && !v.nube.pendiente) v.nube.base = copiaNube(v);
+    ponerEstado(v, v.nube.pendiente ? 'pendiente' : 'al-dia');
     escuchar(v);
   }
   ponerAlDia();
   addEventListener('online', ponerAlDia);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ponerAlDia(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') ponerAlDia();
+    anunciarPresencia();
+  });
 }
 
 function avisar(mensaje) {
@@ -158,6 +222,7 @@ function pintar() {
   mapa?.remove();
   mapa = null;
   const viaje = viajes.find((v) => v.id === abierto);
+  anunciarPresencia();
   if (viaje && pantalla === 'consejos') pintarConsejos(viaje);
   else if (viaje) pintarViaje(viaje);
   else pintarInicio();
@@ -281,7 +346,9 @@ function pintarViaje(v) {
         botonIcono('compartir', 'Compartir viaje', () => compartirViaje(v)),
         botonIcono('borrar', 'Borrar viaje', () => borrarViaje(v), 'peligro'))),
     el('h1', { textContent: v.nombre }),
-    el('p', { className: 'tenue', textContent: [v.destino, plural(v.dias, 'día', 'días'), v.nube ? '☁️ compartido' : ''].filter(Boolean).join(' · ') }),
+    el('p', { className: 'tenue' }, `${v.destino} · ${plural(v.dias, 'día', 'días')}`,
+      ...(v.nube ? [' · ☁️ compartido · ', el('span', { id: 'estado-nube', textContent: TEXTO_ESTADO[estados.get(v.id) ?? 'al-dia'] }),
+        el('span', { id: 'presentes', textContent: textoPresentes(presentes.get(v.id)) })] : [])),
     el('button', { type: 'button', className: 'abrir-consejos', onclick: () => ir(v.id, 'consejos') },
       el('span', { textContent: '📝 Notas y consejos' }),
       el('small', { textContent: [v.nota ? 'nota' : '', v.consejos.length ? plural(v.consejos.length, 'consejo', 'consejos') : ''].filter(Boolean).join(' · ') || 'vacío' }),
@@ -299,6 +366,7 @@ function pintarViaje(v) {
   ].filter(Boolean));
   if (divMapa) pintarMapa(divMapa, v);
   completarFotos(v);
+  situarPendientes(v);
   completarHorarios(v);
   completarRutas(v);
   completarTiempo(v);
@@ -957,6 +1025,45 @@ function creditos(v) {
     ...conAutor.map((l) => enlace(l.nombre, l.autoria, '')));
 }
 
+// Los lugares que el asistente de IA no pudo situar se buscan aquí, con el mismo buscador que al añadirlos a mano.
+let situando = false;
+async function situarPendientes(v) {
+  if (situando || !v.porSituar.length) return;
+  situando = true;
+  try {
+    const zona = await zonaDe(v);
+    if (!zona) return;
+    const sinDias = v.lugares.every((l) => !l.dia);
+    const situados = [];
+    const perdidos = [];
+    for (const p of v.porSituar) {
+      const { opciones } = await buscarLugar(p.nombre, v.destino, zona).catch(() => ({ opciones: [] }));
+      if (!opciones.length) {
+        perdidos.push(p.nombre);
+        continue;
+      }
+      const [sitio] = opciones;
+      situados.push({
+        id: crypto.randomUUID(), enlace: '', nombre: p.nombre, direccion: sitio.direccion, lat: sitio.lat, lon: sitio.lon,
+        dia: p.dia, nota: p.nota, estancia: p.estancia, tipo: p.tipo || adivinarCategoria(`${p.nombre} ${sitio.direccion}`),
+      });
+    }
+    const vigente = viajes.find((x) => x.id === v.id);
+    if (!vigente) return;
+    vigente.lugares.push(...situados);
+    vigente.porSituar = [];
+    // Si no traían días, se reparten como al pulsar Organizar.
+    if (sinDias && vigente.lugares.length && vigente.lugares.every((l) => !l.dia)) vigente.lugares = organizar(vigente);
+    avisar([
+      situados.length ? `Situados en el mapa ${plural(situados.length, 'lugar nuevo', 'lugares nuevos')}.` : '',
+      perdidos.length ? `No encontré: ${perdidos.join(', ')}.` : '',
+    ].filter(Boolean).join(' '));
+    guardar();
+  } finally {
+    situando = false;
+  }
+}
+
 let completando = false;
 async function completarFotos(v) {
   if (completando) return;
@@ -1421,7 +1528,7 @@ $('form-lugares').onsubmit = (e) => {
 };
 document.querySelectorAll('[data-cerrar]').forEach((b) => { b.onclick = () => b.closest('dialog').close(); });
 // Las hojas en las que solo se elige algo se cierran tocando fuera, como en el resto de apps.
-for (const id of ['dlg-elegir', 'dlg-ajustes', 'dlg-comer']) {
+for (const id of ['dlg-elegir', 'dlg-ajustes', 'dlg-comer', 'dlg-compartir', 'dlg-novedades']) {
   $(id).addEventListener('click', (e) => {
     if (e.target !== e.currentTarget) return;
     const r = e.currentTarget.getBoundingClientRect();
@@ -1452,12 +1559,15 @@ function ponerTema(tema) {
 function abrirAjustes() {
   const f = $('form-ajustes');
   f.elements.mapas.value = appMapas();
+  f.elements.nombre.value = miNombre();
+  f.elements.nombre.onchange = (e) => localStorage.setItem(CLAVE_NOMBRE, e.target.value.trim().slice(0, 40));
   f.elements.tema.value = document.documentElement.dataset.tema ?? '';
   f.elements.mapas.onchange = (e) => localStorage.setItem(CLAVE_MAPAS, e.target.value);
   f.elements.tema.onchange = (e) => ponerTema(e.target.value);
   $('exportar').onclick = exportar;
   $('importar').onclick = () => { $('dlg-ajustes').close(); $('archivo').click(); };
   $('buscar-version').onclick = () => { $('dlg-ajustes').close(); buscarVersion(); };
+  $('ver-novedades').onclick = () => { $('dlg-ajustes').close(); abrirNovedades(NOVEDADES.slice(0, 3)); };
   $('version').textContent = '';
   versionActual().then((n) => { $('version').textContent = n ? `Versión ${n}` : ''; });
   $('dlg-ajustes').showModal();
@@ -1494,6 +1604,27 @@ async function vigilarVersiones() {
   });
 }
 
+const CLAVE_NOVEDADES = 'rumbo-novedades';
+
+function abrirNovedades(versiones) {
+  $('lista-novedades').replaceChildren(...versiones.flatMap(({ version, cosas }) => [
+    versiones.length > 1 ? el('h3', { textContent: `Versión ${version}` }) : null,
+    el('ul', {}, ...cosas.map((c) => el('li', { textContent: c }))),
+  ]));
+  $('dlg-novedades').showModal();
+}
+
+/** Tras una actualización, enseña una vez lo nuevo. A quien estrena la app no se le enseña nada. */
+function enseñarNovedades() {
+  const actual = NOVEDADES[0].version;
+  let vista = Number(localStorage.getItem(CLAVE_NOVEDADES));
+  // Quien ya tenía viajes antes de que existiera esta ventana viene de la versión anterior.
+  if (!vista && viajes.length) vista = actual - 1;
+  localStorage.setItem(CLAVE_NOVEDADES, actual);
+  const nuevas = vista ? NOVEDADES.filter((n) => n.version > vista) : [];
+  if (nuevas.length) abrirNovedades(nuevas);
+}
+
 async function buscarVersion() {
   if (!registro) {
     avisar('Las actualizaciones necesitan abrir Rumbo desde su web.');
@@ -1516,9 +1647,14 @@ async function versionActual() {
 /** Sube el viaje a la nube la primera vez; el enlace corto lleva solo su código. */
 async function enlaceCompartido(v) {
   if (!v.nube) {
-    const datos = datosNube(v);
-    v.nube = { id: await nube.crear(datos), version: 1, pendiente: false };
-    sincronizado.set(v.id, JSON.stringify(datos));
+    if (!miNombre()) {
+      const nombre = prompt('¿Cómo te llamas? Lo verá la persona con la que compartes el viaje cuando cambies algo.')?.trim();
+      if (nombre) localStorage.setItem(CLAVE_NOMBRE, nombre.slice(0, 40));
+    }
+    v.editadoPor = miNombre();
+    const datos = copiaNube(v);
+    v.nube = { id: await nube.crear(datos), version: 1, pendiente: false, base: datos };
+    ponerEstado(v, 'al-dia');
     persistir();
     escuchar(v);
     pintar();
@@ -1526,30 +1662,72 @@ async function enlaceCompartido(v) {
   return `${location.origin}${location.pathname}#v=${v.nube.id}`;
 }
 
+const QR = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+let qrListo = null;
+// La librería del QR solo se descarga la primera vez que se pide, con su huella fijada.
+const cargarQr = () => (qrListo ??= new Promise((resolver, fallar) => {
+  const script = Object.assign(document.createElement('script'), {
+    src: QR, integrity: 'sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k', crossOrigin: 'anonymous',
+  });
+  script.onload = () => resolver(window.qrcode);
+  script.onerror = () => {
+    qrListo = null;
+    script.remove();
+    fallar(new Error('Sin QR'));
+  };
+  document.head.append(script);
+}));
+
+async function enviarEnlace(titulo, texto, url) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: titulo, text: texto, url });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  copiarEnlace(url);
+}
+
+async function copiarEnlace(url) {
+  try {
+    await navigator.clipboard.writeText(url);
+    avisar('Enlace copiado.');
+  } catch {
+    avisar('No se pudo copiar el enlace.');
+  }
+}
+
+/** Hoja de compartir: el QR para enseñarlo en persona y el enlace para enviarlo. */
 async function compartirViaje(v) {
   let url;
   let texto = `Mi viaje a ${v.destino} en Rumbo. Lo que cambiemos se verá en los dos móviles.`;
+  let explicacion = 'Quien lo abra podrá verlo y editarlo contigo. Que lo escanee con la cámara o envíale el enlace.';
   try {
     url = await enlaceCompartido(v);
   } catch {
     // Sin conexión: el enlace largo lleva el viaje dentro, pero es una copia que no se sincroniza.
     url = `${location.origin}${location.pathname}#viaje=${await empaquetar(v)}`;
     texto = `Mi viaje a ${v.destino} en Rumbo`;
-    avisar('Sin conexión: el enlace lleva una copia del viaje que no se actualizará sola.');
+    explicacion = 'Sin conexión: este enlace lleva una copia del viaje que no se actualizará sola.';
   }
-  if (navigator.share) {
-    try {
-      await navigator.share({ title: v.nombre, text: texto, url });
-      return;
-    } catch (e) {
-      if (e.name === 'AbortError') return;
-    }
-  }
+  $('compartir-titulo').textContent = `Compartir «${v.nombre}»`;
+  $('compartir-texto').textContent = explicacion;
+  $('compartir-enlace').textContent = url;
+  $('enviar-enlace').onclick = () => enviarEnlace(v.nombre, texto, url);
+  $('copiar-enlace').onclick = () => copiarEnlace(url);
+  const caja = $('qr');
+  caja.replaceChildren(el('p', { className: 'tenue', textContent: 'Preparando el código QR…' }));
+  $('dlg-compartir').showModal();
   try {
-    await navigator.clipboard.writeText(url);
-    avisar('Enlace copiado. Quien lo abra podrá añadir el viaje a su Rumbo.');
+    const qrcode = await cargarQr();
+    const qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    caja.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
   } catch {
-    avisar('No se pudo copiar el enlace.');
+    caja.replaceChildren(el('p', { className: 'tenue', textContent: 'El código QR necesita conexión la primera vez.' }));
   }
 }
 
@@ -1607,8 +1785,8 @@ async function recibirCompartido(codigo) {
   }
   const [v] = validarViajes({ viajes: [{ lugares: [], ...actual.datos, id: '', nube: { id: codigo, version: actual.version } }] });
   if (!confirm(`¿Añadir «${v.nombre}» (${v.destino})? Es un viaje compartido: lo que cambie cualquiera se verá en los dos móviles.`)) return;
+  v.nube.base = copiaNube(v);
   viajes.unshift(v);
-  sincronizado.set(v.id, JSON.stringify(datosNube(v)));
   guardar();
   ir(v.id);
   escuchar(v);
@@ -1712,3 +1890,4 @@ recibirPublicacion();
 navigator.storage?.persist?.();
 vigilarVersiones();
 iniciarNube();
+enseñarNovedades();
