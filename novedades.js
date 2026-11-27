@@ -8,7 +8,7 @@ export const NOVEDADES = [
       'Junto a «☁️ compartido» ves si tus cambios ya han llegado, y un aviso te dice quién ha cambiado qué. Pon tu nombre en Ajustes.',
       '👀 Ves cuándo la otra persona tiene el viaje abierto.',
       'Compartir enseña un código QR para pasar el viaje en persona.',
-      'Puedes pedirle a Claude que te prepare un viaje: con el conector de Rumbo lo crea con sus lugares y te da el enlace.',
+      'Un asistente de IA puede prepararte un viaje: con el conector de Rumbo lo crea con sus lugares y te da el enlace.',
     ],
   },
   {
