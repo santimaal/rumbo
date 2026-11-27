@@ -158,8 +158,19 @@ export function estimarLlegada(salida, km, desfaseOrigen, desfaseDestino) {
   return { hora: `${dosCifras(Math.floor(dia / 60))}:${dosCifras(dia % 60)}`, masDias: Math.floor(total / 1440) };
 }
 
-/** A pie si ningún tramo pasa de 3 km en línea recta. */
-export const aPie = (puntos) => puntos.slice(1).every((p, k) => distanciaKm(puntos[k], p) < 3);
+const A_PIE_KM = 2;
+/** Parte la ruta en tramos seguidos en coche o andando: se anda cuando el salto en línea recta es corto. */
+// shortcut: no cuenta con volver a por el coche después de andar; cada tramo en coche sale de donde se está
+export function tramosRuta(puntos) {
+  const tramos = [];
+  for (let i = 1; i < puntos.length; i++) {
+    const modo = distanciaKm(puntos[i - 1], puntos[i]) < A_PIE_KM ? 'pie' : 'coche';
+    const ultimo = tramos.at(-1);
+    if (ultimo?.modo === modo) ultimo.puntos.push(puntos[i]);
+    else tramos.push({ modo, puntos: [puntos[i - 1], puntos[i]] });
+  }
+  return tramos;
+}
 
 /** Identifica una ruta por sus puntos, redondeados a unos 10 m. */
 export const claveRuta = (puntos) => puntos.map((p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`).join(';');
@@ -260,18 +271,25 @@ export async function desempaquetar(texto) {
 
 const par = (p) => `${p.lat},${p.lon}`;
 export function enlaceLugar(app, l, destino) {
-  return app === 'google'
-    ? `https://www.google.com/maps/search/?${new URLSearchParams({ api: 1, query: `${l.nombre}, ${destino}` })}`
-    : `https://maps.apple.com/?${new URLSearchParams({ q: `${l.nombre}, ${destino.split(',')[0]}`, sll: par(l) })}`;
+  if (app === 'google') return `https://www.google.com/maps/search/?${new URLSearchParams({ api: 1, query: `${l.nombre}, ${destino}` })}`;
+  if (app === 'waze') return `https://waze.com/ul?${new URLSearchParams({ ll: par(l), q: l.nombre })}`;
+  return `https://maps.apple.com/?${new URLSearchParams({ q: `${l.nombre}, ${destino.split(',')[0]}`, sll: par(l) })}`;
 }
 
-/** Enlaces con la ruta entera; más de uno si supera las 9 paradas intermedias que admite Google. */
+/** Enlaces con la ruta: uno por tramo en coche o a pie, y más si pasa de las 9 paradas intermedias que admite Google. */
 export function enlacesRuta(app, puntos) {
+  return tramosRuta(puntos).flatMap((t) => enlacesTramo(app, t.puntos, t.modo === 'pie' ? 'walking' : 'driving')
+    .map((href) => ({ href, modo: t.modo })));
+}
+
+function enlacesTramo(app, puntos, modo) {
+  // Waze solo guía en coche y hacia un destino: un enlace por parada, y los tramos a pie van a Google Maps.
+  if (app === 'waze' && modo === 'driving') return puntos.slice(1).map((p) => `https://waze.com/ul?ll=${par(p)}&navigate=yes`);
+  if (app === 'waze') return enlacesTramo('google', puntos, modo);
   const enlaces = [];
   for (let i = 0; i < puntos.length - 1; i += 10) {
     const trozo = puntos.slice(i, i + 11);
     const paradas = trozo.slice(1, -1).map(par);
-    const modo = aPie(trozo) ? 'walking' : 'driving';
     if (app === 'google') {
       const q = new URLSearchParams({ api: 1, origin: par(trozo[0]), destination: par(trozo.at(-1)), travelmode: modo });
       if (paradas.length) q.set('waypoints', paradas.join('|'));
@@ -284,6 +302,9 @@ export function enlacesRuta(app, puntos) {
   }
   return enlaces;
 }
+
+/** Miniatura de Wikimedia del ancho pedido (de los tamaños que ya tiene hechos: 120, 250, 330, 500…). */
+export const fotoDe = (url, ancho) => url.replace(/\/(\d+)px-([^/]+)$/, `/${ancho}px-$2`);
 
 export const enlaceSeguro = (url) => (/^https?:\/\/\S+$/i.test(url ?? '') ? url : '');
 

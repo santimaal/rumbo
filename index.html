@@ -10,6 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Rumbo">
 <title>Rumbo</title>
 <script>try { const t = localStorage.getItem('rumbo-tema'); if (t) document.documentElement.dataset.tema = t; } catch {}</script>
+<link rel="preconnect" href="https://upload.wikimedia.org" crossorigin>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icono-180.png">
 <link rel="icon" href="icono-180.png">
@@ -21,6 +22,7 @@
 <body>
 <main id="vista"></main>
 <p id="aviso" role="status"></p>
+<div id="actualizacion" role="status" hidden><span>Hay una versión nueva de Rumbo.</span><button type="button" class="fuerte" id="actualizar">Actualizar</button></div>
 
 <dialog id="dlg-viaje" aria-labelledby="viaje-titulo">
   <form method="dialog" id="form-viaje">
@@ -66,14 +68,14 @@
   <form method="dialog" id="form-consejo">
     <h2 id="consejo-titulo">Nuevo consejo</h2>
     <label>Tipo <select name="tipo"></select></label>
-    <label>Consejo <textarea name="texto" rows="5" maxlength="5000" required placeholder="Pide el menú del día, no el de la carta…"></textarea></label>
+    <label>Consejo <textarea autofocus name="texto" rows="5" maxlength="5000" required placeholder="Pide el menú del día, no el de la carta…"></textarea></label>
     <div class="fila"><button type="button" class="texto peligro" id="borrar-consejo" hidden>Borrar</button><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte">Guardar</button></div>
   </form>
 </dialog>
 
 <dialog id="dlg-ajustes" aria-labelledby="ajustes-titulo">
   <form method="dialog" id="form-ajustes">
-    <h2 id="ajustes-titulo">Ajustes</h2>
+    <h2 id="ajustes-titulo" tabindex="-1" autofocus>Ajustes</h2>
     <label>Apariencia
       <select name="tema">
         <option value="">Automática (como el sistema)</option>
@@ -85,12 +87,18 @@
       <select name="mapas">
         <option value="apple">Mapas de Apple</option>
         <option value="google">Google Maps</option>
+        <option value="waze">Waze</option>
       </select>
     </label>
     <fieldset>
       <legend>Copia de seguridad</legend>
       <p class="tenue">Tus viajes solo están en este dispositivo. Guarda una copia de vez en cuando.</p>
       <div class="fila"><button type="button" class="suave" id="exportar">Exportar copia</button><button type="button" class="suave" id="importar">Importar copia</button></div>
+    </fieldset>
+    <fieldset>
+      <legend>Actualizaciones</legend>
+      <p class="tenue" id="version"></p>
+      <div class="fila"><button type="button" class="suave" id="buscar-version">Buscar actualizaciones</button></div>
     </fieldset>
     <div class="fila"><button class="fuerte">Listo</button></div>
   </form>

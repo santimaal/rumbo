@@ -1,4 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { createServer } from 'node:http';
+import { mkdtemp, readdir, readFile, writeFile, cp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, extname } from 'node:path';
 
 const hoy = new Date().toLocaleDateString('sv');
 const lugar = (id, nombre, lat, lon, dia, extra = {}) => ({ id, nombre, lat, lon, dia, foto: '', autoria: '', ...extra });
@@ -20,7 +24,14 @@ async function sinRed(page, { horarios = [] } = {}) {
     if (url.host === 'geocoding-api.open-meteo.com') {
       return json({ results: [{ name: 'Roma', country: 'Italia', country_code: 'IT', feature_code: 'PPLC', latitude: 41.89, longitude: 12.49, population: 2e6 }] });
     }
-    if (url.host === 'routing.openstreetmap.de') return json({ routes: [{ distance: 2500, duration: 1800, geometry: '_p~iF~ps|U_ulLnnqC' }] });
+    if (url.host === 'routing.openstreetmap.de') {
+      // En coche cada tramo son 8 km y 15 min; andando, 600 m y 8 min.
+      const coche = url.pathname.includes('routed-car');
+      const piernas = url.pathname.split('/').at(-1).split(';').length - 1;
+      const pierna = coche ? { distance: 8000, duration: 900 } : { distance: 600, duration: 480 };
+      const legs = Array.from({ length: piernas }, () => pierna);
+      return json({ routes: [{ distance: pierna.distance * piernas, duration: pierna.duration * piernas, geometry: '_p~iF~ps|U_ulLnnqC', legs }] });
+    }
     if (url.host === 'overpass-api.de') return json({ elements: horarios });
     if (url.host === 'www.wikidata.org') return json({ query: { pages: [] }, entities: {} });
     if (url.host === 'photon.komoot.io') return json({ features: [] });
@@ -52,8 +63,26 @@ test('la portada muestra la bandera y los ajustes cambian el tema', async ({ pag
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(14, 24, 29)');
   await page.getByLabel('Apariencia').selectOption('claro');
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-  await page.getByLabel('Abrir lugares y rutas en').selectOption('google');
-  expect(await page.evaluate(() => localStorage.getItem('rumbo-mapas'))).toBe('google');
+  await page.getByLabel('Abrir lugares y rutas en').selectOption('waze');
+  expect(await page.evaluate(() => localStorage.getItem('rumbo-mapas'))).toBe('waze');
+});
+
+test('al abrir ajustes no se despliega ningún selector', async ({ page }) => {
+  await sinRed(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Ajustes' }).click();
+  await expect(page.getByRole('heading', { name: 'Ajustes' })).toBeFocused();
+  await expect(page.getByLabel('Apariencia')).not.toBeFocused();
+});
+
+test('con Waze, los lugares y los tramos en coche se abren en Waze', async ({ page }) => {
+  await sinRed(page);
+  await page.addInitScript(() => localStorage.setItem('rumbo-mapas', 'waze'));
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Ostia Antica', 41.7558, 12.2916, 1)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Coliseo' })).toHaveAttribute('href', /^https:\/\/waze\.com\/ul\?/);
+  await expect(page.locator('.dia').first().locator('a.ruta')).toHaveAttribute('href', /^https:\/\/waze\.com\/ul\?ll=41\.7558,12\.2916&navigate=yes/);
 });
 
 test('consejos por categoría con buscador que tolera erratas', async ({ page }) => {
@@ -65,6 +94,10 @@ test('consejos por categoría con buscador que tolera erratas', async ({ page })
   ] })]);
   await page.goto('/');
   await page.getByText('Roma', { exact: true }).click();
+  // Los consejos tienen su propia pantalla; la del viaje queda para el mapa y las rutas.
+  await expect(page.getByText('Cacio e pepe en Trastevere')).toHaveCount(0);
+  await page.getByRole('button', { name: /Notas y consejos/ }).click();
+  await expect(page.getByRole('heading', { name: 'Notas y consejos' })).toBeVisible();
   await page.getByRole('button', { name: '+ Consejo' }).click();
   await page.getByLabel('Tipo').selectOption('dinero');
   await page.getByLabel('Consejo', { exact: true }).fill('La propina no es obligatoria en los restaurantes');
@@ -75,6 +108,8 @@ test('consejos por categoría con buscador que tolera erratas', async ({ page })
   await expect(page.locator('.consejos .nota:visible')).toHaveText(['La propina no es obligatoria en los restaurantes']);
   await page.getByLabel('Buscar en los consejos').fill('taxi');
   await expect(page.getByText('Ningún consejo se parece a eso.')).toBeVisible();
+  await page.getByRole('button', { name: '‹ Roma' }).click();
+  await expect(page.getByRole('button', { name: /Notas y consejos.*4 consejos/ })).toBeVisible();
 });
 
 test('cada día muestra ruta real, tiempo y horarios', async ({ page }) => {
@@ -82,11 +117,16 @@ test('cada día muestra ruta real, tiempo y horarios', async ({ page }) => {
     { type: 'node', lat: 41.8902, lon: 12.4922, tags: { name: 'Colosseo', 'name:es': 'Coliseo', opening_hours: '09:00-19:00' } },
     { type: 'way', center: { lat: 41.8986, lon: 12.4769 }, tags: { name: 'Pantheon', 'name:es': 'Panteón', opening_hours: 'Mo-Su off' } },
   ] });
-  await sembrar(page, [viaje({ fecha: hoy, lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
+  // Hotel lejos del centro: se va en coche al Coliseo y de ahí andando al Panteón.
+  await sembrar(page, [viaje({ fecha: hoy, hoteles: [{ nombre: 'Hotel Ostia', lat: 41.7558, lon: 12.2916, desde: 1 }],
+    lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
   await page.goto('/');
   await page.getByText('Roma', { exact: true }).click();
   const dia1 = page.locator('.dia').first();
-  await expect(dia1).toContainText('2,5 km · 30 min a pie');
+  await expect(dia1).toContainText('🚗 16 km (30 min) + 🚶 600 m (8 min)');
+  await expect(dia1.locator('.parada', { hasText: 'Coliseo' }).locator('.tramo')).toHaveText('🚗 15 min · 8 km');
+  await expect(dia1.locator('.parada', { hasText: 'Panteón' }).locator('.tramo')).toHaveText('🚶 8 min · 600 m');
+  await expect(dia1.locator('a.ruta')).toHaveText(['🚗 Ruta 1', '🚶 Ruta 2', '🚗 Ruta 3']);
   await expect(dia1).toContainText('🌧️ 24°/15° lluvia, 70% lluvia');
   await expect(dia1).toContainText('Ese día abre 09:00–19:00');
   await expect(dia1).toContainText('⚠ Cerrado ese día');
@@ -99,7 +139,8 @@ test('arrastrar una parada la mueve a otro día', async ({ page }) => {
   await page.getByText('Roma', { exact: true }).click();
   const asa = page.getByRole('button', { name: 'Arrastrar Coliseo' });
   const destino = page.locator('.parada', { hasText: 'Panteón' });
-  await asa.scrollIntoViewIfNeeded();
+  // Centrada para que no quede debajo de la barra fija de abajo.
+  await asa.evaluate((e) => e.scrollIntoView({ block: 'center' }));
   const a = await asa.boundingBox();
   await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
   await page.mouse.down();
@@ -128,7 +169,7 @@ test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ 
   otro.on('dialog', (d) => d.accept());
   await otro.goto(url);
   await expect(otro.getByRole('heading', { name: 'Roma' })).toBeVisible();
-  await expect(otro.getByText('Supplì en Trastevere')).toBeVisible();
+  await expect(otro.getByRole('button', { name: /Notas y consejos.*1 consejo/ })).toBeVisible();
   await expect(otro.getByText('Coliseo')).toBeVisible();
   expect(new URL(otro.url()).hash).toBe('');
 });
@@ -143,4 +184,55 @@ test('lo compartido desde otra app abre el formulario de lugares', async ({ page
   await expect(page.getByLabel('Enlace del reel o TikTok (opcional)')).toHaveValue('https://www.instagram.com/reel/abc');
   await expect(page.getByLabel('Texto de la publicación')).toHaveValue(/📍 Miradouro da Graça/);
   await expect(page.locator('h1')).toHaveText('Lisboa');
+});
+
+// Playwright no intercepta las peticiones del propio service worker: se sirve una copia cuyo sw.js se puede cambiar.
+async function copiaServida() {
+  const dir = await mkdtemp(join(tmpdir(), 'rumbo-'));
+  for (const f of await readdir('.')) if (/\.(html|js|css|webmanifest|png)$/.test(f)) await cp(f, join(dir, f));
+  const tipos = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webmanifest': 'application/manifest+json', '.png': 'image/png' };
+  const servidor = createServer(async (req, res) => {
+    const ruta = new URL(req.url, 'http://x').pathname.slice(1) || 'index.html';
+    try {
+      const cuerpo = await readFile(join(dir, ruta));
+      res.writeHead(200, { 'content-type': tipos[extname(ruta)] ?? 'application/octet-stream', 'cache-control': 'no-store' }).end(cuerpo);
+    } catch {
+      res.writeHead(404).end();
+    }
+  });
+  await new Promise((r) => { servidor.listen(0, r); });
+  const original = await readFile('sw.js', 'utf8');
+  return {
+    url: `http://localhost:${servidor.address().port}/`,
+    // Sin maplibre en la lista: la prueba no debe depender de unpkg.
+    version: (n) => writeFile(join(dir, 'sw.js'), original.replace(/rumbo-\d+/, `rumbo-${n}`).replace(/, `\$\{MAPLIBRE\}[^`]+`/g, '')),
+    cerrar: () => new Promise((r) => { servidor.close(r); }),
+  };
+}
+
+test('avisa de una versión nueva y la aplica sin reinstalar', async ({ browser }) => {
+  const copia = await copiaServida();
+  const contexto = await browser.newContext({ serviceWorkers: 'allow' });
+  const page = await contexto.newPage();
+  await sinRed(page);
+  try {
+    await copia.version(6);
+    await page.goto(copia.url);
+    await page.waitForFunction(() => navigator.serviceWorker.controller);
+    await expect(page.locator('#actualizacion')).toBeHidden();
+
+    await copia.version(7);
+    await page.getByRole('button', { name: 'Ajustes' }).click();
+    await page.getByRole('button', { name: 'Buscar actualizaciones' }).click();
+    await expect(page.getByText('Hay una versión nueva de Rumbo.')).toBeVisible();
+    await Promise.all([page.waitForEvent('load'), page.getByRole('button', { name: 'Actualizar' }).click()]);
+    await expect.poll(() => page.evaluate(() => caches.keys())).toEqual(['rumbo-7']);
+    await expect(page.locator('#actualizacion')).toBeHidden();
+
+    await page.getByRole('button', { name: 'Ajustes' }).click();
+    await expect(page.getByText('Versión 7')).toBeVisible();
+  } finally {
+    await contexto.close();
+    await copia.cerrar();
+  }
 });

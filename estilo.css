@@ -59,6 +59,8 @@ button, .boton, select {
 }
 select { font-size: 16px; padding: 6px 8px; max-width: 100%; }
 button:disabled { opacity: .45; cursor: default; }
+[tabindex="-1"]:focus { outline: none; }
+.moviendo .barra { pointer-events: none; }
 :focus-visible { outline: 3px solid var(--marca); outline-offset: 2px; }
 .fuerte { background: var(--marca); color: var(--sobre-marca); border-color: transparent; font-weight: 650; }
 .suave { font-weight: 600; }
@@ -84,11 +86,22 @@ button:disabled { opacity: .45; cursor: default; }
 .dia { margin: 28px 0 0; }
 .cabecera { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .cabecera h2 { background: var(--c); color: #fff; border-radius: 8px; padding: 4px 10px; line-height: 1.2; }
-.ruta { border: 2px solid var(--c); color: var(--c); background: none; font-weight: 650; padding: 4px 12px; }
+.rutas { margin: 8px 0 6px; gap: 6px; }
+.ruta { white-space: nowrap; border: 2px solid var(--c); color: var(--c); background: none; font-weight: 650; padding: 4px 12px; }
 .vuelo { font-weight: 600; margin-top: 8px; }
 .nota { display: block; width: 100%; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--nota); border-color: var(--nota-raya); margin: 8px 0; line-height: 1.35; }
-.consejos { margin: 20px 0 0; }
-.consejos summary { display: flex; align-items: baseline; gap: 8px; min-height: 44px; cursor: pointer; }
+.consejos { margin: 0; }
+.apartado { margin: 24px 0 8px; }
+.abrir-consejos { width: 100%; margin-top: 12px; justify-content: flex-start; gap: 10px; border-radius: 14px; text-align: left; }
+.abrir-consejos span:first-child { font-weight: 650; }
+.abrir-consejos small { flex: 1; }
+.abrir-consejos span:last-child { font-size: 22px; color: var(--tenue); }
+.tramo { display: block; margin: -2px 0 4px; font-weight: 600; }
+.tramo.coche { color: var(--tinta); }
+#actualizacion { position: fixed; left: 16px; right: 16px; top: calc(env(safe-area-inset-top) + 12px); max-width: 480px; margin: auto; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 16px; border-radius: 14px; background: var(--tinta); color: var(--fondo); box-shadow: 0 4px 16px #0004; }
+#actualizacion[hidden] { display: none; }
+#actualizacion span { flex: 1; }
+#actualizacion .fuerte { flex: none; }
 .consejos h3 { font-size: 17px; margin: 14px 0 0; }
 .consejos .nota { margin: 6px 0; }
 .consejos [hidden] { display: none; }

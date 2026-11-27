@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar } from './logica.js';
+import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar } from './logica.js';
 
 assert.deepEqual(
   extraerLugares('Lo mejor de Roma 😍\n📍 Trattoria Da Enzo - la mejor pasta\n📍Panteón 📍 Coliseo (reserva!)\n#roma #viajes'),
@@ -51,11 +51,11 @@ assert.equal(estimarLlegada('', 100, 0, 0), null);
 
 const puntos = Array.from({ length: 13 }, (_, i) => p(i, 0, i / 100));
 assert.equal(enlacesRuta('google', puntos).length, 2);
-assert.equal(new URL(enlacesRuta('google', puntos)[0]).searchParams.get('waypoints').split('|').length, 9);
-assert.equal(new URL(enlacesRuta('google', puntos)[1]).searchParams.get('origin'), '0,0.1');
-assert.equal(new URL(enlacesRuta('apple', puntos)[0]).searchParams.getAll('waypoint').length, 9);
+assert.equal(new URL(enlacesRuta('google', puntos)[0].href).searchParams.get('waypoints').split('|').length, 9);
+assert.equal(new URL(enlacesRuta('google', puntos)[1].href).searchParams.get('origin'), '0,0.1');
+assert.equal(new URL(enlacesRuta('apple', puntos)[0].href).searchParams.getAll('waypoint').length, 9);
 assert.equal(enlacesRuta('apple', puntos.slice(0, 11)).length, 1);
-assert.equal(new URL(enlacesRuta('apple', [p('', 0, 0), p('', 0, 1)])[0]).searchParams.get('mode'), 'driving');
+assert.equal(new URL(enlacesRuta('apple', [p('', 0, 0), p('', 0, 1)])[0].href).searchParams.get('mode'), 'driving');
 assert.deepEqual(enlacesRuta('apple', [puntos[0]]), []);
 
 assert.ok(Math.abs(distanciaKm(p('', 40.4168, -3.7038), p('', 41.3874, 2.1686)) - 505) < 5);
@@ -123,3 +123,16 @@ assert.equal(recibido.lugares[0].foto, undefined);
 assert.deepEqual({ ...recibido, id: 'x', lugares: [] }, { ...original, lugares: [] });
 assert.equal(recibido.lugares[0].horario, 'Mo-Su 09:00-19:00');
 await assert.rejects(desempaquetar('basura'));
+
+// Rutas mixtas: en coche hasta la zona y andando entre lo que está cerca.
+const mixta = tramosRuta([p('h', 0, 0), p('a', 0, 0.5), p('b', 0, 0.51), p('c', 0, 0.52), p('d', 0, 1)]);
+assert.deepEqual(mixta.map((t) => `${t.modo}:${t.puntos.map((x) => x.id).join('')}`), ['coche:ha', 'pie:abc', 'coche:cd']);
+const enlacesMixta = enlacesRuta('google', [p('h', 0, 0), p('a', 0, 0.5), p('b', 0, 0.51)]);
+assert.deepEqual(enlacesMixta.map((e) => [e.modo, new URL(e.href).searchParams.get('travelmode')]), [['coche', 'driving'], ['pie', 'walking']]);
+const enlacesWaze = enlacesRuta('waze', [p('h', 0, 0), p('a', 0, 0.5), p('b', 0, 0.51), p('c', 0, 1)]);
+assert.deepEqual(enlacesWaze.map((e) => new URL(e.href).host), ['waze.com', 'www.google.com', 'waze.com']);
+assert.match(enlaceLugar('waze', p('', 41.9, 12.5), 'Roma'), /^https:\/\/waze\.com\/ul\?ll=41\.9%2C12\.5/);
+
+assert.equal(fotoDe('https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo.jpg/500px-Colosseo.jpg', 250),
+  'https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo.jpg/250px-Colosseo.jpg');
+assert.equal(fotoDe('https://upload.wikimedia.org/wikipedia/commons/d/de/Colosseo.jpg', 250), 'https://upload.wikimedia.org/wikipedia/commons/d/de/Colosseo.jpg');

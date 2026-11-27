@@ -93,7 +93,7 @@ function foto(pagina) {
     autoria: `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(pagina.pageimage)}`,
   };
 }
-const CON_FOTO = { piprop: 'thumbnail|name', pithumbsize: 500, pilimit: 50 };
+const CON_FOTO = { piprop: 'thumbnail|name', pithumbsize: 330, pilimit: 50 };
 
 async function nombresDe(ids) {
   const { entities = {} } = await wikidata({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels|descriptions', languages: `${IDIOMA}|en`, languagefallback: 1 });
@@ -224,7 +224,10 @@ export async function rutaReal(puntos, aPie) {
   const datos = await pedir(`https://routing.openstreetmap.de/${perfil}/route/v1/driving/${coordenadas}`, { overview: 'simplified', geometries: 'polyline' }, 1100);
   const [ruta] = datos?.routes ?? [];
   if (!ruta) return null;
-  return { km: ruta.distance / 1000, min: ruta.duration / 60, modo: aPie ? 'pie' : 'coche', linea: decodificarPolilinea(ruta.geometry) };
+  return {
+    km: ruta.distance / 1000, min: ruta.duration / 60, modo: aPie ? 'pie' : 'coche', linea: decodificarPolilinea(ruta.geometry),
+    piernas: ruta.legs.map((l) => ({ km: l.distance / 1000, min: l.duration / 60 })),
+  };
 }
 
 const nombresOsm = (tags) => Object.entries(tags).filter(([k]) => k === 'name' || k.startsWith('name:')).map(([, v]) => v);

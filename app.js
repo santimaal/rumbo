@@ -1,6 +1,6 @@
 import {
   extraerLugares, parecido, organizar, distanciaKm, largo, extremosDelDia, minutosUtiles, enlaceLugar, enlacesRuta,
-  enlaceSeguro, diasValidos, validarViajes, TIPOS_CONSEJO, coincide, aPie, claveRuta, duracion, horarioDelDia, tiempoDe, bandera,
+  enlaceSeguro, fotoDe, diasValidos, validarViajes, TIPOS_CONSEJO, coincide, tramosRuta, claveRuta, duracion, horarioDelDia, tiempoDe, bandera,
   empaquetar, desempaquetar,
 } from './logica.js';
 import {
@@ -13,11 +13,12 @@ const COLORES = ['#c2362b', '#1f6fb2', '#2f7d3b', '#8a3fa8', '#a85a00', '#00757a
 const color = (dia) => (dia ? COLORES[(dia - 1) % COLORES.length] : '#5d7079');
 const $ = (id) => document.getElementById(id);
 const CLAVE_MAPAS = 'rumbo-mapas';
-const appMapas = () => (localStorage.getItem(CLAVE_MAPAS) === 'google' ? 'google' : 'apple');
+const appMapas = () => (['google', 'waze'].includes(localStorage.getItem(CLAVE_MAPAS)) ? localStorage.getItem(CLAVE_MAPAS) : 'apple');
 
 let temporizador;
 let viajes = cargar();
 let abierto = null;
+let pantalla = null;
 let mapa = null;
 
 function cargar() {
@@ -75,12 +76,14 @@ function pintar() {
   mapa?.remove();
   mapa = null;
   const viaje = viajes.find((v) => v.id === abierto);
-  if (viaje) pintarViaje(viaje);
+  if (viaje && pantalla === 'consejos') pintarConsejos(viaje);
+  else if (viaje) pintarViaje(viaje);
   else pintarInicio();
 }
 
-function ir(id) {
+function ir(id, a = null) {
   abierto = id;
+  pantalla = a;
   pintar();
   scrollTo(0, 0);
 }
@@ -137,11 +140,10 @@ function pintarViaje(v) {
         botonIcono('borrar', 'Borrar viaje', () => borrarViaje(v), 'peligro'))),
     el('h1', { textContent: v.nombre }),
     el('p', { className: 'tenue', textContent: `${v.destino} · ${plural(v.dias, 'día', 'días')}` }),
-    el('div', { className: 'fila' },
-      v.nota ? null : boton('+ Nota', () => editarNota('Nota del viaje', v.nota, (t) => { v.nota = t; }), 'texto'),
-      boton('+ Consejo', () => editarConsejo(v), 'texto')),
-    nota(v.nota, 'Nota del viaje', (t) => { v.nota = t; }),
-    seccionConsejos(v),
+    el('button', { type: 'button', className: 'abrir-consejos', onclick: () => ir(v.id, 'consejos') },
+      el('span', { textContent: '📝 Notas y consejos' }),
+      el('small', { textContent: [v.nota ? 'nota' : '', v.consejos.length ? plural(v.consejos.length, 'consejo', 'consejos') : ''].filter(Boolean).join(' · ') || 'vacío' }),
+      el('span', { ariaHidden: 'true', textContent: '›' })),
     divMapa,
     v.lugares.length ? null : el('p', { textContent: 'Aún no hay lugares. Mira las ideas o pega el texto de una publicación.' }),
     sueltos.length ? seccionDia(v, 0, sueltos) : null,
@@ -202,7 +204,9 @@ async function completarTiempo(v) {
   } catch { /* sin previsión: el día se muestra sin el tiempo */ }
 }
 
-const CLAVE_RUTAS = 'rumbo-rutas';
+// La 2 guarda cada tramo en coche o a pie por separado; la anterior se descarta.
+const CLAVE_RUTAS = 'rumbo-rutas-2';
+try { localStorage.removeItem('rumbo-rutas'); } catch { /* nada que limpiar */ }
 const rutas = (() => {
   try {
     return JSON.parse(localStorage.getItem(CLAVE_RUTAS)) ?? {};
@@ -226,8 +230,9 @@ async function completarRutas(v) {
   for (const puntos of pendientes) {
     const clave = claveRuta(puntos);
     try {
-      const ruta = await rutaReal(puntos, aPie(puntos));
-      if (ruta) rutas[clave] = ruta;
+      const tramos = [];
+      for (const t of tramosRuta(puntos)) tramos.push(await rutaReal(t.puntos, t.modo === 'pie'));
+      if (tramos.every(Boolean)) rutas[clave] = { tramos };
       else rutasFallidas.add(clave);
     } catch {
       rutasFallidas.add(clave);
@@ -262,6 +267,27 @@ async function completarHorarios(v) {
   }
 }
 
+const kmTexto = (km) => (km < 1 ? `${Math.round(km * 100) * 10} m` : `${km.toLocaleString('es', { maximumFractionDigits: 1 })} km`);
+const MODOS = { coche: '🚗', pie: '🚶' };
+
+/** Totales en coche y a pie del día. */
+function textoRuta(real) {
+  return ['coche', 'pie'].map((modo) => {
+    const tramos = real.tramos.filter((t) => t.modo === modo);
+    if (!tramos.length) return '';
+    const km = tramos.reduce((s, t) => s + t.km, 0);
+    const min = tramos.reduce((s, t) => s + t.min, 0);
+    return `${MODOS[modo]} ${kmTexto(km)} (${duracion(min)})`;
+  }).filter(Boolean).join(' + ');
+}
+
+/** Cómo se llega a cada punto desde el anterior: en coche o andando, con distancia y tiempo. */
+const llegadas = (real) => [null, ...real.tramos.flatMap((t) => t.piernas.map((p) => ({ ...p, modo: t.modo })))];
+function lineaTramo(llegada) {
+  if (!llegada) return null;
+  return el('small', { className: `tramo ${llegada.modo}`, textContent: `${MODOS[llegada.modo]} ${duracion(llegada.min)} · ${kmTexto(llegada.km)}` });
+}
+
 function lineaHorario(v, l) {
   if (!l.horario) return null;
   const semana = l.dia ? diaSemana(v, l.dia) : null;
@@ -288,10 +314,12 @@ function seccionDia(v, dia, lugares) {
   const real = lugares.length && puntos.length > 1 ? rutaDe(puntos) : null;
   const km = lugares.length ? largo(puntos) : 0;
   const rutas = lugares.length ? enlacesRuta(appMapas(), puntos) : [];
+  const llega = real ? llegadas(real) : [];
+  const desplazar = ends.inicio && lugares.length ? 1 : 0;
   const ponerNota = (t) => { v.notasDia = { ...v.notasDia, [dia]: t }; };
   const resumen = [
     dia && fechaDelDia(v, dia),
-    real ? `${real.km.toLocaleString('es', { maximumFractionDigits: 1 })} km · ${duracion(real.min)} ${real.modo === 'pie' ? 'a pie' : 'en coche'}`
+    real ? textoRuta(real)
       : km ? `${km.toLocaleString('es', { maximumFractionDigits: 1 })} km en línea recta` : plural(lugares.length, 'lugar', 'lugares'),
     dia && textoTiempo(v, dia),
     dia && !minutosUtiles(v)[dia - 1] ? 'sin tiempo libre por el vuelo' : '',
@@ -299,26 +327,30 @@ function seccionDia(v, dia, lugares) {
   const seccion = el('section', { className: 'dia', color: color(dia) },
     el('div', { className: 'cabecera' },
       el('h2', { textContent: dia ? `Día ${dia}` : 'Sin día' }),
-      ...rutas.map((href, i) => enlace(rutas.length > 1 ? `Ruta ${i + 1}` : 'Ruta', href, 'boton ruta')),
       dia && !v.notasDia[dia] ? boton('Nota', () => editarNota(`Nota del día ${dia}`, '', ponerNota), 'texto') : null),
+    rutas.length ? el('div', { className: 'fila rutas' },
+      ...rutas.map(({ href, modo }, i) => enlace(`${MODOS[modo]} ${rutas.length > 1 ? `Ruta ${i + 1}` : 'Ruta'}`, href, 'boton ruta'))) : null,
     el('small', { textContent: resumen }),
     ...lineaVuelo(v, dia),
     dia ? nota(v.notasDia[dia], `Nota del día ${dia}`, ponerNota) : null,
     el('ol', { className: 'paradas' },
       ends.inicio && lugares.length ? extremo(v, ends.inicio) : null,
-      ...lugares.map((l, i) => parada(v, l, i, lugares)),
-      ends.fin && lugares.length ? extremo(v, ends.fin) : null));
+      ...lugares.map((l, i) => parada(v, l, i, lugares, llega[i + desplazar])),
+      ends.fin && lugares.length ? extremo(v, ends.fin, llega.at(-1)) : null));
   seccion.dataset.dia = dia;
   return seccion;
 }
 
-const comoIr = (p) => (appMapas() === 'google'
-  ? `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`
-  : `https://maps.apple.com/?daddr=${p.lat},${p.lon}`);
+const comoIr = (p) => ({
+  google: `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`,
+  waze: `https://waze.com/ul?ll=${p.lat},${p.lon}&navigate=yes`,
+  apple: `https://maps.apple.com/?daddr=${p.lat},${p.lon}`,
+})[appMapas()];
 
-function extremo(v, p) {
+function extremo(v, p, llegada = null) {
   return el('li', { className: 'parada extremo' },
     el('b', { textContent: p.iata ? '\u2708\uFE0E' : 'H' }),
+    lineaTramo(llegada),
     el('div', { className: 'fila' }, el('strong', { textContent: p.nombre }), enlace('Ir', comoIr(p))));
 }
 
@@ -336,6 +368,21 @@ function editarNota(titulo, texto, poner) {
     guardar();
   };
   $('dlg-nota').showModal();
+}
+
+function pintarConsejos(v) {
+  const ponerNota = (t) => { v.nota = t; };
+  $('vista').replaceChildren(...[
+    el('div', { className: 'arriba' }, boton(`‹ ${v.nombre}`, () => ir(v.id), 'texto')),
+    el('h1', { textContent: 'Notas y consejos' }),
+    el('p', { className: 'tenue', textContent: v.destino }),
+    el('h2', { className: 'apartado', textContent: 'Nota del viaje' }),
+    v.nota ? nota(v.nota, 'Nota del viaje', ponerNota)
+      : boton('+ Escribir una nota', () => editarNota('Nota del viaje', '', ponerNota), 'texto'),
+    el('h2', { className: 'apartado', textContent: 'Consejos' }),
+    seccionConsejos(v) ?? el('p', { className: 'tenue', textContent: 'Apunta dónde comer, dónde no comprar, cómo moverte… Se ordenan solos por tipo.' }),
+    el('div', { className: 'barra' }, el('div', { className: 'fila' }, boton('+ Consejo', () => editarConsejo(v), 'fuerte'))),
+  ].filter(Boolean));
 }
 
 function seccionConsejos(v) {
@@ -358,8 +405,7 @@ function seccionConsejos(v) {
     }
     vacio.hidden = alguno;
   };
-  return el('details', { className: 'consejos', open: true },
-    el('summary', {}, el('h2', { textContent: 'Consejos' }), el('small', { textContent: plural(v.consejos.length, 'consejo', 'consejos') })),
+  return el('div', { className: 'consejos' },
     v.consejos.length > 3 ? el('input', { type: 'search', placeholder: 'Buscar en los consejos…', ariaLabel: 'Buscar en los consejos', autocomplete: 'off', enterKeyHint: 'search', oninput: filtrar }) : null,
     ...secciones, vacio);
 }
@@ -389,7 +435,7 @@ function editarConsejo(v, c = null) {
   $('dlg-consejo').showModal();
 }
 
-function parada(v, l, i, hermanos) {
+function parada(v, l, i, hermanos, llegada = null) {
   const mover = el('select', {
     ariaLabel: `Día de ${l.nombre}`,
     onchange: (e) => {
@@ -415,6 +461,7 @@ function parada(v, l, i, hermanos) {
   const li = el('li', { className: 'parada' },
     el('b', { textContent: i + 1 }),
     asa,
+    lineaTramo(llegada),
     el('div', { className: 'ficha' },
       el('div', {}, enlace(l.nombre, enlaceLugar(appMapas(), l, v.destino), 'titulo'), el('small', { textContent: l.direccion }), lineaHorario(v, l)),
       l.foto ? miniatura(l, v.destino) : null),
@@ -442,6 +489,8 @@ function arrastrar(e, v, l, li) {
   fantasma.classList.add('fantasma');
   li.after(hueco);
   li.classList.add('arrastrando');
+  // La barra de abajo deja pasar el dedo para poder soltar debajo de ella.
+  document.body.classList.add('moviendo');
   document.body.append(fantasma);
   let y = e.clientY;
   // Cerca de los bordes la página se desplaza sola para llegar a otros días.
@@ -473,6 +522,7 @@ function arrastrar(e, v, l, li) {
     removeEventListener('pointerup', soltar);
     removeEventListener('pointercancel', soltar);
     fantasma.remove();
+    document.body.classList.remove('moviendo');
     const dia = Number(hueco.closest('.dia').dataset.dia);
     let siguiente = hueco.nextElementSibling;
     while (siguiente && (!siguiente.dataset.id || siguiente === li)) siguiente = siguiente.nextElementSibling;
@@ -528,9 +578,16 @@ async function pintarMapa(div, v) {
   este.on('load', () => porDia.forEach((lugares, dia) => {
     const puntos = dia ? puntosDelDia(v, dia, lugares) : [];
     if (!lugares.length || puntos.length < 2) return;
-    const linea = rutaDe(puntos)?.linea ?? puntos.map((l) => [l.lon, l.lat]);
-    este.addSource(`dia-${dia}`, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: linea } } });
-    este.addLayer({ id: `dia-${dia}`, type: 'line', source: `dia-${dia}`, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': color(dia), 'line-width': 5 } });
+    // En coche, línea continua; andando, a trazos.
+    const tramos = rutaDe(puntos)?.tramos ?? tramosRuta(puntos).map((t) => ({ ...t, linea: t.puntos.map((l) => [l.lon, l.lat]) }));
+    tramos.forEach((t, i) => {
+      const id = `dia-${dia}-${i}`;
+      este.addSource(id, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: t.linea } } });
+      este.addLayer({
+        id, type: 'line', source: id, layout: { 'line-cap': t.modo === 'pie' ? 'butt' : 'round', 'line-join': 'round' },
+        paint: { 'line-color': color(dia), 'line-width': 5, ...(t.modo === 'pie' && { 'line-dasharray': [1.2, 1] }) },
+      });
+    });
   }));
 }
 
@@ -549,7 +606,7 @@ function anadir(v, nuevos) {
 }
 
 function miniatura(l, destino) {
-  const img = el('img', { src: l.foto, alt: `Ver ${l.nombre} en el mapa`, loading: 'lazy', width: 88, height: 88 });
+  const img = el('img', { src: fotoDe(l.foto, 250), alt: `Ver ${l.nombre} en el mapa`, loading: 'lazy', decoding: 'async', width: 88, height: 88 });
   const ver = enlace('', enlaceLugar(appMapas(), l, destino), 'foto');
   ver.append(img);
   img.onerror = () => ver.remove();
@@ -703,7 +760,7 @@ async function abrirIdeas(v) {
     ver.ariaLabel = `Ver ${idea.nombre} en el mapa, con valoraciones`;
     return el('div', { className: 'idea' },
       el('label', {}, marca,
-        idea.foto ? el('img', { src: idea.foto, alt: '', loading: 'lazy' }) : el('span', { className: 'sinfoto', textContent: idea.nombre.charAt(0) }),
+        idea.foto ? el('img', { src: fotoDe(idea.foto, 330), alt: '', loading: 'lazy', decoding: 'async' }) : el('span', { className: 'sinfoto', textContent: idea.nombre.charAt(0) }),
         el('span', { textContent: idea.nombre }), el('small', { textContent: idea.direccion })),
       ver);
   };
@@ -1042,9 +1099,61 @@ function abrirAjustes() {
   f.elements.tema.onchange = (e) => ponerTema(e.target.value);
   $('exportar').onclick = exportar;
   $('importar').onclick = () => { $('dlg-ajustes').close(); $('archivo').click(); };
+  $('buscar-version').onclick = () => { $('dlg-ajustes').close(); buscarVersion(); };
+  $('version').textContent = '';
+  versionActual().then((n) => { $('version').textContent = n ? `Versión ${n}` : ''; });
   $('dlg-ajustes').showModal();
 }
 document.querySelectorAll('meta[name=theme-color]').forEach((m) => Object.assign(m.dataset, { media: m.media, color: m.content }));
+
+let registro = null;
+let recargando = false;
+
+function ofrecerVersion(nueva) {
+  if (!nueva || !navigator.serviceWorker.controller) return;
+  $('actualizar').onclick = () => {
+    recargando = true;
+    $('actualizar').disabled = true;
+    nueva.postMessage('actualizar');
+  };
+  $('actualizacion').hidden = false;
+}
+
+/** Avisa cuando hay una versión publicada más nueva y la aplica al pulsar, sin reinstalar la app. */
+async function vigilarVersiones() {
+  if (!navigator.serviceWorker) return;
+  registro = await navigator.serviceWorker.register('sw.js').catch(() => null);
+  if (!registro) return;
+  ofrecerVersion(registro.waiting);
+  registro.onupdatefound = () => {
+    const nueva = registro.installing;
+    nueva.onstatechange = () => { if (nueva.state === 'installed') ofrecerVersion(nueva); };
+  };
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (recargando) location.reload(); });
+  // Las apps instaladas pasan días abiertas en segundo plano: se mira al volver a ellas.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') registro.update().catch(() => {});
+  });
+}
+
+async function buscarVersion() {
+  if (!registro) {
+    avisar('Las actualizaciones necesitan abrir Rumbo desde su web.');
+    return;
+  }
+  try {
+    await registro.update();
+  } catch {
+    avisar('No se pudo comprobar. Revisa la conexión.');
+    return;
+  }
+  if (!registro.installing && !registro.waiting) avisar('Ya tienes la última versión.');
+}
+
+async function versionActual() {
+  const claves = (await caches?.keys().catch(() => [])) ?? [];
+  return claves.filter((c) => c.startsWith('rumbo-')).map((c) => Number(c.slice(6))).sort((a, b) => b - a)[0];
+}
 
 async function compartirViaje(v) {
   const url = `${location.origin}${location.pathname}#viaje=${await empaquetar(v)}`;
@@ -1147,4 +1256,4 @@ ponerTema(document.documentElement.dataset.tema);
 recibirViaje();
 recibirPublicacion();
 navigator.storage?.persist?.();
-navigator.serviceWorker?.register('sw.js');
+vigilarVersiones();
