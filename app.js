@@ -470,7 +470,9 @@ function seccionConsejos(v) {
   const grupos = TIPOS_CONSEJO.map((t) => [t, v.consejos.filter((c) => c.tipo === t.id)]).filter(([, lista]) => lista.length);
   const secciones = grupos.map(([t, lista]) => {
     const botones = lista.map((c) => Object.assign(
-      el('button', { type: 'button', className: 'nota', textContent: c.texto, title: 'Editar consejo', onclick: () => editarConsejo(v, c) }),
+      el('div', { className: 'consejo' },
+        el('button', { type: 'button', className: 'nota', textContent: c.texto, title: 'Editar consejo', onclick: () => editarConsejo(v, c) }),
+        c.enlace ? enlace('▶ Ver vídeo', c.enlace, 'boton video') : null),
       { buscable: `${t.nombre} ${c.texto}` }));
     return Object.assign(el('section', {}, el('h3', { textContent: `${t.icono} ${t.nombre}` }), ...botones), { botones });
   });
@@ -490,12 +492,14 @@ function seccionConsejos(v) {
     ...secciones, vacio);
 }
 
-function editarConsejo(v, c = null) {
+/** `inicial` rellena un consejo nuevo, por ejemplo con el texto y el enlace de un reel. */
+function editarConsejo(v, c = null, inicial = {}) {
   const f = $('form-consejo');
   $('consejo-titulo').textContent = c ? 'Editar consejo' : 'Nuevo consejo';
   f.elements.tipo.replaceChildren(...TIPOS_CONSEJO.map((t) => el('option', { value: t.id, textContent: `${t.icono} ${t.nombre}` })));
   f.elements.tipo.value = c?.tipo ?? f.dataset.ultimo ?? 'comida';
-  f.elements.texto.value = c?.texto ?? '';
+  f.elements.texto.value = c?.texto ?? inicial.texto ?? '';
+  f.elements.enlace.value = c?.enlace ?? inicial.enlace ?? '';
   $('borrar-consejo').hidden = !c;
   $('borrar-consejo').onclick = () => {
     if (!confirm('¿Borrar este consejo?')) return;
@@ -506,10 +510,11 @@ function editarConsejo(v, c = null) {
   f.onsubmit = () => {
     const texto = f.elements.texto.value.trim();
     const tipo = f.elements.tipo.value;
+    const enlaceVideo = enlaceSeguro(f.elements.enlace.value.trim());
     f.dataset.ultimo = tipo;
     if (c && !texto) v.consejos = v.consejos.filter((x) => x !== c);
-    else if (c) Object.assign(c, { tipo, texto });
-    else if (texto) v.consejos.push({ id: crypto.randomUUID(), tipo, texto });
+    else if (c) Object.assign(c, { tipo, texto, enlace: enlaceVideo });
+    else if (texto) v.consejos.push({ id: crypto.randomUUID(), tipo, texto, enlace: enlaceVideo });
     guardar();
   };
   $('dlg-consejo').showModal();
@@ -1142,6 +1147,14 @@ function mostrarHallazgo(nombre, { opciones, seguro }, fallo) {
 }
 
 $('buscar').onclick = buscar;
+// Un reel con recomendaciones (dónde comer, qué evitar…) se guarda entero como consejo, con su enlace.
+$('como-consejo').onclick = () => {
+  const v = viajes.find((x) => x.id === abierto);
+  const f = $('form-lugares');
+  const inicial = { texto: f.elements.texto.value.trim(), enlace: enlaceSeguro(f.elements.enlace.value.trim()) };
+  $('dlg-lugares').close();
+  editarConsejo(v, null, inicial);
+};
 $('form-lugares').elements.texto.oninput = () => vaciarResultados();
 $('dlg-lugares').onclose = () => vaciarResultados();
 $('form-lugares').onsubmit = (e) => {

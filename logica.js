@@ -378,6 +378,7 @@ function consejosValidos(consejos) {
     id: texto(c.id) || crypto.randomUUID(),
     tipo: TIPOS_CONSEJO.some((t) => t.id === c.tipo) ? c.tipo : 'otro',
     texto: c.texto.slice(0, NOTA),
+    enlace: enlaceSeguro(texto(c.enlace, 2000)),
   }));
 }
 

@@ -375,3 +375,24 @@ test('por defecto los lugares y las rutas se abren en Google Maps', async ({ pag
   await page.getByRole('button', { name: 'Ajustes' }).click();
   await expect(page.getByLabel('Abrir lugares y rutas en')).toHaveValue('google');
 });
+
+test('un reel se puede guardar como consejo con su enlace', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje()]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Añadir', exact: true }).click();
+  await page.getByLabel('Enlace del reel o TikTok (opcional)').fill('https://www.tiktok.com/@roma/video/123');
+  await page.getByLabel('Texto de la publicación').fill('Dónde comer barato en Roma: supplì en Trastevere');
+  await page.getByRole('button', { name: 'Guardar como consejo' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Nuevo consejo' })).toBeVisible();
+  await expect(page.getByLabel('Consejo', { exact: true })).toHaveValue('Dónde comer barato en Roma: supplì en Trastevere');
+  await expect(page.getByLabel('Enlace del vídeo (opcional)')).toHaveValue('https://www.tiktok.com/@roma/video/123');
+  await page.getByLabel('Tipo').selectOption('comida');
+  await page.getByRole('button', { name: 'Guardar' }).click();
+
+  await page.getByRole('button', { name: /Notas y consejos/ }).click();
+  await expect(page.getByRole('link', { name: '▶ Ver vídeo' })).toHaveAttribute('href', 'https://www.tiktok.com/@roma/video/123');
+  expect((await guardados(page))[0].consejos[0]).toMatchObject({ tipo: 'comida', enlace: 'https://www.tiktok.com/@roma/video/123' });
+});

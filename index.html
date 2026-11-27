@@ -39,8 +39,8 @@
   <form method="dialog" id="form-lugares">
     <h2 id="lugares-titulo">Añadir lugares</h2>
     <label>Enlace del reel o TikTok (opcional) <input name="enlace" type="url" inputmode="url" placeholder="https://" autocomplete="off"></label>
-    <label>Texto de la publicación <textarea name="texto" rows="5" required placeholder="Pega aquí la descripción, o escribe un lugar por línea"></textarea></label>
-    <button type="button" class="suave" id="buscar">Buscar lugares</button>
+    <label>Texto de la publicación <textarea name="texto" rows="5" placeholder="Pega aquí la descripción, o escribe un lugar por línea"></textarea></label>
+    <div class="fila"><button type="button" class="suave" id="buscar">Buscar lugares</button><button type="button" class="texto" id="como-consejo">Guardar como consejo</button></div>
     <div id="resultados" aria-live="polite"></div>
     <div class="fila"><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte" id="anadir" disabled>Añadir</button></div>
   </form>
@@ -69,6 +69,7 @@
     <h2 id="consejo-titulo">Nuevo consejo</h2>
     <label>Tipo <select name="tipo"></select></label>
     <label>Consejo <textarea autofocus name="texto" rows="5" maxlength="5000" required placeholder="Pide el menú del día, no el de la carta…"></textarea></label>
+    <label>Enlace del vídeo (opcional) <input name="enlace" type="url" inputmode="url" placeholder="https://" autocomplete="off"></label>
     <div class="fila"><button type="button" class="texto peligro" id="borrar-consejo" hidden>Borrar</button><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte">Guardar</button></div>
   </form>
 </dialog>

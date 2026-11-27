@@ -114,6 +114,9 @@ button:disabled { opacity: .45; cursor: default; }
 #actualizacion .fuerte { flex: none; }
 .consejos h3 { font-size: 17px; margin: 14px 0 0; }
 .consejos .nota { margin: 6px 0; }
+.consejo { margin: 6px 0 10px; }
+.consejo .nota { margin: 0; }
+.consejo .video { margin-top: 6px; font-weight: 600; }
 .consejos [hidden] { display: none; }
 .titulo { display: block; font-weight: 700; color: inherit; overflow-wrap: anywhere; padding-top: 3px; text-decoration-color: var(--raya); text-underline-offset: 3px; }
 .parada.extremo > b { background: var(--c); color: #fff; }
