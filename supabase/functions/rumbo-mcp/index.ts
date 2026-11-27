@@ -7,7 +7,7 @@ import { validarViajes, datosNube, organizar, adivinarCategoria, enZona, CATEGOR
 const SUPABASE = 'https://centngtgakviminnkkva.supabase.co';
 const CLAVE = 'sb_publishable_dVqHWB9XsMJZ8AOVrFVGrw_1goCCoFT';
 const APP = 'https://santimaal.github.io/rumbo/';
-const AUTOR = 'Asistente IA';
+const AUTOR = 'IA';
 
 const espera = (ms) => new Promise((r) => { setTimeout(r, ms); });
 
