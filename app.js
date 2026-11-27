@@ -1,8 +1,11 @@
 import {
   extraerLugares, parecido, organizar, distanciaKm, largo, extremosDelDia, minutosUtiles, enlaceLugar, enlacesRuta,
-  enlaceSeguro, diasValidos, validarViajes,
+  enlaceSeguro, diasValidos, validarViajes, TIPOS_CONSEJO, coincide, aPie, claveRuta, duracion, horarioDelDia, tiempoDe, bandera,
+  empaquetar, desempaquetar,
 } from './logica.js';
-import { IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa } from './fuentes.js';
+import {
+  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, buscarHorarios, prevision,
+} from './fuentes.js';
 
 const CLAVE = 'rumbo';
 // Tonos oscuros para que el número blanco se lea encima.
@@ -53,6 +56,19 @@ function el(etiqueta, props = {}, ...hijos) {
 }
 const boton = (textContent, onclick, className = 'suave') => el('button', { type: 'button', textContent, onclick, className });
 const enlace = (texto, href, className = 'boton') => el('a', { className, target: '_blank', rel: 'noopener noreferrer', textContent: texto, href });
+// Trazos de 24×24 con el color del texto.
+const ICONOS = {
+  editar: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  compartir: '<path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>',
+  borrar: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/><path d="M10 11v6M14 11v6"/>',
+  avion: '<path d="M2 16.5 22 9c-.5-1.8-2.3-2.6-4-2L14 8.5 7 4 5 5l4.5 5-4 1.5L3 10l-1.5 1L5 14z"/><path d="M3 21h18"/>',
+  ajustes: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+};
+function botonIcono(nombre, etiqueta, onclick, className = '') {
+  const b = el('button', { type: 'button', className: `icono ${className}`.trim(), ariaLabel: etiqueta, title: etiqueta, onclick });
+  b.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONOS[nombre]}</svg>`;
+  return b;
+}
 const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 
 function pintar() {
@@ -71,23 +87,38 @@ function ir(id) {
 
 function pintarInicio() {
   $('vista').replaceChildren(
-    el('h1', { textContent: 'Rumbo' }),
+    el('div', { className: 'arriba' }, el('h1', { textContent: 'Rumbo' }), botonIcono('ajustes', 'Ajustes', abrirAjustes)),
     el('p', { className: 'tenue', textContent: 'Tus viajes, parada a parada.' }),
     viajes.length
       ? el('ul', { className: 'lista' }, ...viajes.map((v) => el('li', {}, el('button', { type: 'button', className: 'viaje', onclick: () => ir(v.id) },
-        el('span', {}, el('strong', { textContent: v.nombre }),
+        v.pais ? el('span', { className: 'bandera', ariaHidden: 'true', textContent: bandera(v.pais) }) : null,
+        el('span', { className: 'nombre' }, el('strong', { textContent: v.nombre }),
           el('small', { textContent: `${v.destino} · ${plural(v.dias, 'día', 'días')} · ${plural(v.lugares.length, 'lugar', 'lugares')}` })),
         el('span', { className: 'puntos', ariaHidden: 'true' }, ...Array.from({ length: Math.min(v.dias, 5) }, (_, i) => el('i', { color: color(i + 1) })))))))
       : el('p', { textContent: 'Crea tu primer viaje: elige ciudad y te propongo qué ver.' }),
-    el('div', { className: 'fila' },
-      boton('Exportar copia', exportar, 'texto'),
-      boton('Importar copia', () => $('archivo').click(), 'texto')),
-    el('label', { className: 'ajuste' }, 'Abrir lugares y rutas en ',
-      el('select', { onchange: (e) => localStorage.setItem(CLAVE_MAPAS, e.target.value) },
-        el('option', { value: 'apple', textContent: 'Mapas de Apple', selected: appMapas() === 'apple' }),
-        el('option', { value: 'google', textContent: 'Google Maps', selected: appMapas() === 'google' }))),
     el('div', { className: 'barra' }, el('div', { className: 'fila' }, boton('Nuevo viaje', () => editarViaje(), 'fuerte'))),
   );
+  completarPaises();
+}
+
+// Los viajes creados antes de guardar el país lo buscan por su destino, una vez por sesión.
+let buscandoPaises = false;
+async function completarPaises() {
+  if (buscandoPaises) return;
+  buscandoPaises = true;
+  let alguno = false;
+  for (const v of viajes.filter((x) => !x.pais && x.destino)) {
+    try {
+      const [ciudadGuardada, ...pais] = v.destino.split(',');
+      const opciones = await buscarCiudades(ciudadGuardada.trim());
+      const elegida = opciones.find((o) => pais.length && o.destino.endsWith(pais.at(-1).trim())) ?? opciones[0];
+      if (elegida?.pais) {
+        v.pais = elegida.pais;
+        alguno = true;
+      }
+    } catch { /* sin conexión: queda sin bandera */ }
+  }
+  if (alguno) guardar();
 }
 
 function pintarViaje(v) {
@@ -97,15 +128,20 @@ function pintarViaje(v) {
   const divMapa = v.lugares.length ? el('div', { id: 'mapa' }) : null;
 
   $('vista').replaceChildren(...[
-    boton('‹ Viajes', () => ir(null), 'texto'),
+    el('div', { className: 'arriba' },
+      boton('‹ Viajes', () => ir(null), 'texto'),
+      el('div', { className: 'iconos' },
+        botonIcono('editar', 'Editar viaje', () => editarViaje(v)),
+        botonIcono('avion', 'Vuelos y hotel', () => abrirLogistica(v)),
+        botonIcono('compartir', 'Compartir viaje', () => compartirViaje(v)),
+        botonIcono('borrar', 'Borrar viaje', () => borrarViaje(v), 'peligro'))),
     el('h1', { textContent: v.nombre }),
     el('p', { className: 'tenue', textContent: `${v.destino} · ${plural(v.dias, 'día', 'días')}` }),
     el('div', { className: 'fila' },
-      boton('Editar', () => editarViaje(v), 'texto'),
-      boton('Vuelos y hotel', () => abrirLogistica(v), 'texto'),
-      v.nota ? null : boton('Nota', () => editarNota('Nota del viaje', v.nota, (t) => { v.nota = t; }), 'texto'),
-      boton('Borrar viaje', () => borrarViaje(v), 'texto peligro')),
+      v.nota ? null : boton('+ Nota', () => editarNota('Nota del viaje', v.nota, (t) => { v.nota = t; }), 'texto'),
+      boton('+ Consejo', () => editarConsejo(v), 'texto')),
     nota(v.nota, 'Nota del viaje', (t) => { v.nota = t; }),
+    seccionConsejos(v),
     divMapa,
     v.lugares.length ? null : el('p', { textContent: 'Aún no hay lugares. Mira las ideas o pega el texto de una publicación.' }),
     sueltos.length ? seccionDia(v, 0, sueltos) : null,
@@ -118,6 +154,9 @@ function pintarViaje(v) {
   ].filter(Boolean));
   if (divMapa) pintarMapa(divMapa, v);
   completarFotos(v);
+  completarHorarios(v);
+  completarRutas(v);
+  completarTiempo(v);
 }
 
 function puntosDelDia(v, dia, lugares) {
@@ -130,6 +169,106 @@ function fechaDelDia(v, dia) {
   const f = new Date(`${v.fecha}T12:00:00`);
   f.setDate(f.getDate() + dia - 1);
   return f.toLocaleDateString(IDIOMA, { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function fechaISO(v, dia) {
+  const f = new Date(`${v.fecha}T12:00:00Z`);
+  f.setUTCDate(f.getUTCDate() + dia - 1);
+  return f.toISOString().slice(0, 10);
+}
+const diaSemana = (v, dia) => (v.fecha ? new Date(`${fechaISO(v, dia)}T12:00:00Z`).getUTCDay() : null);
+
+const tiempos = new Map();
+function textoTiempo(v, dia) {
+  const t = v.fecha && tiempos.get(v.id)?.[fechaISO(v, dia)];
+  if (!t || t.max === null) return '';
+  const { icono, nombre } = tiempoDe(t.codigo);
+  return `${icono} ${Math.round(t.max)}°/${Math.round(t.min)}° ${nombre}${t.lluvia >= 20 ? `, ${t.lluvia}% lluvia` : ''}`;
+}
+
+/** Previsión de los días del viaje que caen en los próximos 16 días; una petición por viaje y hora. */
+async function completarTiempo(v) {
+  if (!v.fecha || !v.zona) return;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const limite = new Date(Date.now() + 15 * 864e5).toISOString().slice(0, 10);
+  const desde = [fechaISO(v, 1), hoy].sort()[1];
+  const hasta = [fechaISO(v, v.dias), limite].sort()[0];
+  const clave = `${v.zona.lat},${v.zona.lon},${desde},${hasta},${Math.floor(Date.now() / 36e5)}`;
+  if (desde > hasta || tiempos.get(v.id)?.clave === clave) return;
+  tiempos.set(v.id, { clave });
+  try {
+    tiempos.set(v.id, { clave, ...(await prevision(v.zona, desde, hasta)) });
+    if (abierto === v.id) pintar();
+  } catch { /* sin previsión: el día se muestra sin el tiempo */ }
+}
+
+const CLAVE_RUTAS = 'rumbo-rutas';
+const rutas = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(CLAVE_RUTAS)) ?? {};
+  } catch {
+    return {};
+  }
+})();
+const rutasFallidas = new Set();
+const rutaDe = (puntos) => rutas[claveRuta(puntos)];
+
+// shortcut: el orden sigue saliendo de la línea recta; la ruta real solo da tiempos y el dibujo.
+let calculandoRutas = false;
+async function completarRutas(v) {
+  if (calculandoRutas) return;
+  const pendientes = Array.from({ length: v.dias }, (_, i) => {
+    const lugares = v.lugares.filter((l) => l.dia === i + 1);
+    return lugares.length ? puntosDelDia(v, i + 1, lugares) : [];
+  }).filter((p) => p.length > 1 && p.length <= 50 && !rutaDe(p) && !rutasFallidas.has(claveRuta(p)));
+  if (!pendientes.length) return;
+  calculandoRutas = true;
+  for (const puntos of pendientes) {
+    const clave = claveRuta(puntos);
+    try {
+      const ruta = await rutaReal(puntos, aPie(puntos));
+      if (ruta) rutas[clave] = ruta;
+      else rutasFallidas.add(clave);
+    } catch {
+      rutasFallidas.add(clave);
+    }
+  }
+  // Solo se guardan las 100 últimas para no llenar el almacenamiento.
+  Object.keys(rutas).slice(0, -100).forEach((c) => delete rutas[c]);
+  try {
+    localStorage.setItem(CLAVE_RUTAS, JSON.stringify(rutas));
+  } catch { /* sin espacio: se recalculan la próxima vez */ }
+  calculandoRutas = false;
+  if (abierto === v.id) pintar();
+}
+
+let buscandoHorarios = false;
+async function completarHorarios(v) {
+  const pendientes = v.lugares.filter((l) => l.horario === undefined);
+  if (buscandoHorarios || !pendientes.length) return;
+  buscandoHorarios = true;
+  try {
+    const horarios = await buscarHorarios(pendientes);
+    for (const [id, horario] of horarios) {
+      const vigente = v.lugares.find((x) => x.id === id);
+      if (vigente) vigente.horario = horario;
+    }
+    buscandoHorarios = false;
+    guardar();
+  } catch {
+    // Sin conexión o servidor ocupado: se reintenta al volver a abrir la app, no en cada repintado.
+    pendientes.forEach((l) => { l.horario = null; });
+    buscandoHorarios = false;
+  }
+}
+
+function lineaHorario(v, l) {
+  if (!l.horario) return null;
+  const semana = l.dia ? diaSemana(v, l.dia) : null;
+  const horas = semana === null ? null : horarioDelDia(l.horario, semana);
+  if (horas?.length === 0) return el('small', { className: 'horario cerrado', textContent: '⚠ Cerrado ese día' });
+  const bonito = (h) => h.replace('-', '–');
+  return el('small', { className: 'horario', textContent: horas ? `Ese día abre ${horas.map(bonito).join(' y ')}` : `Horario: ${l.horario}` });
 }
 
 const lugarAeropuerto = (a) => (a ? `${a.ciudad || a.nombre} (${a.iata})` : '');
@@ -146,15 +285,18 @@ function lineaVuelo(v, dia) {
 function seccionDia(v, dia, lugares) {
   const ends = dia ? extremosDelDia(v, dia) : {};
   const puntos = dia ? puntosDelDia(v, dia, lugares) : [];
+  const real = lugares.length && puntos.length > 1 ? rutaDe(puntos) : null;
   const km = lugares.length ? largo(puntos) : 0;
   const rutas = lugares.length ? enlacesRuta(appMapas(), puntos) : [];
   const ponerNota = (t) => { v.notasDia = { ...v.notasDia, [dia]: t }; };
   const resumen = [
     dia && fechaDelDia(v, dia),
-    km ? `${km.toLocaleString('es', { maximumFractionDigits: 1 })} km en línea recta` : plural(lugares.length, 'lugar', 'lugares'),
+    real ? `${real.km.toLocaleString('es', { maximumFractionDigits: 1 })} km · ${duracion(real.min)} ${real.modo === 'pie' ? 'a pie' : 'en coche'}`
+      : km ? `${km.toLocaleString('es', { maximumFractionDigits: 1 })} km en línea recta` : plural(lugares.length, 'lugar', 'lugares'),
+    dia && textoTiempo(v, dia),
     dia && !minutosUtiles(v)[dia - 1] ? 'sin tiempo libre por el vuelo' : '',
   ].filter(Boolean).join(' · ');
-  return el('section', { className: 'dia', color: color(dia) },
+  const seccion = el('section', { className: 'dia', color: color(dia) },
     el('div', { className: 'cabecera' },
       el('h2', { textContent: dia ? `Día ${dia}` : 'Sin día' }),
       ...rutas.map((href, i) => enlace(rutas.length > 1 ? `Ruta ${i + 1}` : 'Ruta', href, 'boton ruta')),
@@ -166,6 +308,8 @@ function seccionDia(v, dia, lugares) {
       ends.inicio && lugares.length ? extremo(v, ends.inicio) : null,
       ...lugares.map((l, i) => parada(v, l, i, lugares)),
       ends.fin && lugares.length ? extremo(v, ends.fin) : null));
+  seccion.dataset.dia = dia;
+  return seccion;
 }
 
 const comoIr = (p) => (appMapas() === 'google'
@@ -194,6 +338,57 @@ function editarNota(titulo, texto, poner) {
   $('dlg-nota').showModal();
 }
 
+function seccionConsejos(v) {
+  if (!v.consejos.length) return null;
+  const grupos = TIPOS_CONSEJO.map((t) => [t, v.consejos.filter((c) => c.tipo === t.id)]).filter(([, lista]) => lista.length);
+  const secciones = grupos.map(([t, lista]) => {
+    const botones = lista.map((c) => Object.assign(
+      el('button', { type: 'button', className: 'nota', textContent: c.texto, title: 'Editar consejo', onclick: () => editarConsejo(v, c) }),
+      { buscable: `${t.nombre} ${c.texto}` }));
+    return Object.assign(el('section', {}, el('h3', { textContent: `${t.icono} ${t.nombre}` }), ...botones), { botones });
+  });
+  const vacio = el('p', { className: 'tenue', hidden: true, textContent: 'Ningún consejo se parece a eso.' });
+  // Filtra sin repintar para no perder el foco del buscador.
+  const filtrar = (e) => {
+    let alguno = false;
+    for (const s of secciones) {
+      for (const b of s.botones) b.hidden = !coincide(e.target.value, b.buscable);
+      s.hidden = s.botones.every((b) => b.hidden);
+      alguno ||= !s.hidden;
+    }
+    vacio.hidden = alguno;
+  };
+  return el('details', { className: 'consejos', open: true },
+    el('summary', {}, el('h2', { textContent: 'Consejos' }), el('small', { textContent: plural(v.consejos.length, 'consejo', 'consejos') })),
+    v.consejos.length > 3 ? el('input', { type: 'search', placeholder: 'Buscar en los consejos…', ariaLabel: 'Buscar en los consejos', autocomplete: 'off', enterKeyHint: 'search', oninput: filtrar }) : null,
+    ...secciones, vacio);
+}
+
+function editarConsejo(v, c = null) {
+  const f = $('form-consejo');
+  $('consejo-titulo').textContent = c ? 'Editar consejo' : 'Nuevo consejo';
+  f.elements.tipo.replaceChildren(...TIPOS_CONSEJO.map((t) => el('option', { value: t.id, textContent: `${t.icono} ${t.nombre}` })));
+  f.elements.tipo.value = c?.tipo ?? f.dataset.ultimo ?? 'comida';
+  f.elements.texto.value = c?.texto ?? '';
+  $('borrar-consejo').hidden = !c;
+  $('borrar-consejo').onclick = () => {
+    if (!confirm('¿Borrar este consejo?')) return;
+    v.consejos = v.consejos.filter((x) => x !== c);
+    $('dlg-consejo').close();
+    guardar();
+  };
+  f.onsubmit = () => {
+    const texto = f.elements.texto.value.trim();
+    const tipo = f.elements.tipo.value;
+    f.dataset.ultimo = tipo;
+    if (c && !texto) v.consejos = v.consejos.filter((x) => x !== c);
+    else if (c) Object.assign(c, { tipo, texto });
+    else if (texto) v.consejos.push({ id: crypto.randomUUID(), tipo, texto });
+    guardar();
+  };
+  $('dlg-consejo').showModal();
+}
+
 function parada(v, l, i, hermanos) {
   const mover = el('select', {
     ariaLabel: `Día de ${l.nombre}`,
@@ -210,16 +405,18 @@ function parada(v, l, i, hermanos) {
     guardar();
   });
   subir.ariaLabel = `Subir ${l.nombre}`;
-  const quitar = boton('Quitar', () => {
+  const quitar = botonIcono('borrar', `Quitar ${l.nombre}`, () => {
     if (!confirm(`¿Quitar «${l.nombre}»?`)) return;
     v.lugares = v.lugares.filter((x) => x !== l);
     guardar();
-  }, 'texto peligro');
+  }, 'peligro');
   const ponerNota = (t) => { l.nota = t; };
-  return el('li', { className: 'parada' },
+  const asa = el('button', { type: 'button', className: 'asa', textContent: '⠿', ariaLabel: `Arrastrar ${l.nombre}`, title: 'Arrastra para mover' });
+  const li = el('li', { className: 'parada' },
     el('b', { textContent: i + 1 }),
+    asa,
     el('div', { className: 'ficha' },
-      el('div', {}, enlace(l.nombre, enlaceLugar(appMapas(), l, v.destino), 'titulo'), el('small', { textContent: l.direccion })),
+      el('div', {}, enlace(l.nombre, enlaceLugar(appMapas(), l, v.destino), 'titulo'), el('small', { textContent: l.direccion }), lineaHorario(v, l)),
       l.foto ? miniatura(l, v.destino) : null),
     nota(l.nota, `Nota de ${l.nombre}`, ponerNota),
     el('div', { className: 'fila' },
@@ -228,11 +425,76 @@ function parada(v, l, i, hermanos) {
       mover, i ? subir : null,
       l.nota ? null : boton('Nota', () => editarNota(`Nota de ${l.nombre}`, '', ponerNota), 'texto'),
       quitar));
+  li.dataset.id = l.id;
+  asa.onpointerdown = (e) => arrastrar(e, v, l, li);
+  return li;
+}
+
+/** Mueve una parada con el dedo o el ratón a otra posición o a otro día. */
+function arrastrar(e, v, l, li) {
+  if (e.button) return;
+  e.preventDefault();
+  const hueco = el('li', { className: 'hueco', ariaHidden: 'true' });
+  const fantasma = li.cloneNode(true);
+  const caja = li.getBoundingClientRect();
+  const dy = e.clientY - caja.top;
+  Object.assign(fantasma.style, { position: 'fixed', left: `${caja.left}px`, width: `${caja.width}px`, top: `${caja.top}px` });
+  fantasma.classList.add('fantasma');
+  li.after(hueco);
+  li.classList.add('arrastrando');
+  document.body.append(fantasma);
+  let y = e.clientY;
+  // Cerca de los bordes la página se desplaza sola para llegar a otros días.
+  let marco = requestAnimationFrame(function desplazar() {
+    const borde = 80;
+    if (y < borde) scrollBy(0, -12);
+    else if (y > innerHeight - borde) scrollBy(0, 12);
+    marco = requestAnimationFrame(desplazar);
+  });
+  const mover = (ev) => {
+    y = ev.clientY;
+    fantasma.style.top = `${y - dy}px`;
+    const debajo = document.elementFromPoint(ev.clientX, y);
+    const lista = debajo?.closest('.dia')?.querySelector('.paradas');
+    if (!lista) return;
+    const otra = debajo.closest('.parada:not(.extremo):not(.arrastrando)');
+    if (otra) {
+      const { top, height } = otra.getBoundingClientRect();
+      otra[y < top + height / 2 ? 'before' : 'after'](hueco);
+    } else if (!lista.contains(hueco)) {
+      const fin = lista.querySelector('.extremo:last-child:not(:first-child)');
+      if (fin) fin.before(hueco);
+      else lista.append(hueco);
+    }
+  };
+  const soltar = () => {
+    cancelAnimationFrame(marco);
+    removeEventListener('pointermove', mover);
+    removeEventListener('pointerup', soltar);
+    removeEventListener('pointercancel', soltar);
+    fantasma.remove();
+    const dia = Number(hueco.closest('.dia').dataset.dia);
+    let siguiente = hueco.nextElementSibling;
+    while (siguiente && (!siguiente.dataset.id || siguiente === li)) siguiente = siguiente.nextElementSibling;
+    const antes = siguiente && v.lugares.find((x) => x.id === siguiente.dataset.id);
+    hueco.remove();
+    li.classList.remove('arrastrando');
+    const resto = v.lugares.filter((x) => x !== l);
+    const sitio = antes ? resto.indexOf(antes) : resto.findLastIndex((x) => x.dia === dia) + 1 || resto.length;
+    resto.splice(sitio, 0, l);
+    const cambia = l.dia !== dia || resto.some((x, i) => x !== v.lugares[i]);
+    l.dia = dia;
+    v.lugares = resto;
+    if (cambia) guardar();
+  };
+  addEventListener('pointermove', mover);
+  addEventListener('pointerup', soltar);
+  addEventListener('pointercancel', soltar);
 }
 
 async function pintarMapa(div, v) {
   try {
-    const estilo = await estiloMapa();
+    const estilo = await estiloMapa(oscuro());
     if (!div.isConnected) return;
     const puntos = [...v.lugares, ...v.hoteles].map((l) => [l.lon, l.lat]);
     const limites = puntos.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(puntos[0], puntos[0]));
@@ -266,7 +528,8 @@ async function pintarMapa(div, v) {
   este.on('load', () => porDia.forEach((lugares, dia) => {
     const puntos = dia ? puntosDelDia(v, dia, lugares) : [];
     if (!lugares.length || puntos.length < 2) return;
-    este.addSource(`dia-${dia}`, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: puntos.map((l) => [l.lon, l.lat]) } } });
+    const linea = rutaDe(puntos)?.linea ?? puntos.map((l) => [l.lon, l.lat]);
+    este.addSource(`dia-${dia}`, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: linea } } });
     este.addLayer({ id: `dia-${dia}`, type: 'line', source: `dia-${dia}`, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': color(dia), 'line-width': 5 } });
   }));
 }
@@ -391,7 +654,7 @@ function editarViaje(v) {
     const datos = {
       nombre: f.elements.nombre.value.trim() || ciudad?.nombre || v?.nombre || 'Viaje',
       dias: diasValidos(f.elements.dias.value),
-      ...(ciudad && { destino: ciudad.destino, zona: ciudad.zona }),
+      ...(ciudad && { destino: ciudad.destino, zona: ciudad.zona, pais: ciudad.pais }),
     };
     if (v) {
       Object.assign(v, datos);
@@ -751,6 +1014,103 @@ $('form-lugares').onsubmit = (e) => {
 };
 document.querySelectorAll('[data-cerrar]').forEach((b) => { b.onclick = () => b.closest('dialog').close(); });
 
+const CLAVE_TEMA = 'rumbo-tema';
+const oscuro = () => {
+  const tema = document.documentElement.dataset.tema;
+  return tema ? tema === 'oscuro' : matchMedia('(prefers-color-scheme: dark)').matches;
+};
+function ponerTema(tema) {
+  if (tema) document.documentElement.dataset.tema = tema;
+  else delete document.documentElement.dataset.tema;
+  try {
+    if (tema) localStorage.setItem(CLAVE_TEMA, tema);
+    else localStorage.removeItem(CLAVE_TEMA);
+  } catch { /* sin almacenamiento: vale para esta sesión */ }
+  document.querySelectorAll('meta[name=theme-color]').forEach((m) => {
+    m.media = tema ? 'all' : m.dataset.media;
+    if (tema) m.content = oscuro() ? '#0e181d' : '#ffffff';
+    else m.content = m.dataset.color;
+  });
+  pintar();
+}
+
+function abrirAjustes() {
+  const f = $('form-ajustes');
+  f.elements.mapas.value = appMapas();
+  f.elements.tema.value = document.documentElement.dataset.tema ?? '';
+  f.elements.mapas.onchange = (e) => localStorage.setItem(CLAVE_MAPAS, e.target.value);
+  f.elements.tema.onchange = (e) => ponerTema(e.target.value);
+  $('exportar').onclick = exportar;
+  $('importar').onclick = () => { $('dlg-ajustes').close(); $('archivo').click(); };
+  $('dlg-ajustes').showModal();
+}
+document.querySelectorAll('meta[name=theme-color]').forEach((m) => Object.assign(m.dataset, { media: m.media, color: m.content }));
+
+async function compartirViaje(v) {
+  const url = `${location.origin}${location.pathname}#viaje=${await empaquetar(v)}`;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: v.nombre, text: `Mi viaje a ${v.destino} en Rumbo`, url });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    avisar('Enlace copiado. Quien lo abra podrá añadir el viaje a su Rumbo.');
+  } catch {
+    avisar('No se pudo copiar el enlace.');
+  }
+}
+
+// El viaje va tras # para que nunca llegue al servidor.
+async function recibirViaje() {
+  const [, paquete] = /^#viaje=([\w-]+)$/.exec(location.hash) ?? [];
+  if (!paquete) return;
+  history.replaceState(null, '', location.pathname);
+  try {
+    const v = await desempaquetar(paquete);
+    if (!confirm(`¿Añadir «${v.nombre}» (${v.destino}) a tus viajes?`)) return;
+    viajes.unshift(v);
+    abierto = v.id;
+    guardar();
+    avisar('Viaje añadido.');
+  } catch (error) {
+    avisar(error.message);
+  }
+}
+
+// Texto que llega desde el botón de compartir de otra app (Instagram, TikTok…), con la app instalada en Android.
+function recibirPublicacion() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('compartir')) return;
+  history.replaceState(null, '', location.pathname);
+  const todo = [q.get('titulo'), q.get('texto'), q.get('enlace')].filter(Boolean).join('\n');
+  const enlaceVisto = enlaceSeguro(q.get('enlace') ?? '') || enlaceSeguro(/https?:\/\/\S+/.exec(todo)?.[0] ?? '');
+  const texto = todo.replace(/https?:\/\/\S+/g, '').trim();
+  if (!viajes.length) {
+    avisar('Crea primero un viaje para guardar los lugares.');
+    return;
+  }
+  const abrir = (v) => {
+    ir(v.id);
+    abrirLugares();
+    const f = $('form-lugares');
+    f.elements.enlace.value = enlaceVisto;
+    f.elements.texto.value = texto;
+    if (texto) buscar();
+  };
+  if (viajes.length === 1) {
+    abrir(viajes[0]);
+    return;
+  }
+  $('elegir-viaje').replaceChildren(...viajes.map((v) => el('button', {
+    type: 'button', className: 'ciudad', onclick: () => { $('dlg-elegir').close(); abrir(v); },
+  }, el('span', { textContent: `${bandera(v.pais)} ${v.nombre}`.trim() }), el('small', { textContent: v.destino }))));
+  $('dlg-elegir').showModal();
+}
+
 async function exportar() {
   const archivo = new File([JSON.stringify({ viajes }, null, 2)], `rumbo-${new Date().toISOString().slice(0, 10)}.json`, { type: 'application/json' });
   if (navigator.canShare?.({ files: [archivo] })) {
@@ -783,6 +1143,8 @@ $('archivo').onchange = async (e) => {
   }
 };
 
-pintar();
+ponerTema(document.documentElement.dataset.tema);
+recibirViaje();
+recibirPublicacion();
 navigator.storage?.persist?.();
 navigator.serviceWorker?.register('sw.js');

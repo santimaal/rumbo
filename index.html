@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e181d" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Rumbo">
 <title>Rumbo</title>
+<script>try { const t = localStorage.getItem('rumbo-tema'); if (t) document.documentElement.dataset.tema = t; } catch {}</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icono-180.png">
 <link rel="icon" href="icono-180.png">
@@ -57,6 +59,48 @@
     <h2 id="nota-titulo">Nota</h2>
     <textarea name="texto" rows="7" maxlength="5000" aria-labelledby="nota-titulo" placeholder="Reservas, horarios, recordatorios…"></textarea>
     <div class="fila"><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte">Guardar</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-consejo" aria-labelledby="consejo-titulo">
+  <form method="dialog" id="form-consejo">
+    <h2 id="consejo-titulo">Nuevo consejo</h2>
+    <label>Tipo <select name="tipo"></select></label>
+    <label>Consejo <textarea name="texto" rows="5" maxlength="5000" required placeholder="Pide el menú del día, no el de la carta…"></textarea></label>
+    <div class="fila"><button type="button" class="texto peligro" id="borrar-consejo" hidden>Borrar</button><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte">Guardar</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-ajustes" aria-labelledby="ajustes-titulo">
+  <form method="dialog" id="form-ajustes">
+    <h2 id="ajustes-titulo">Ajustes</h2>
+    <label>Apariencia
+      <select name="tema">
+        <option value="">Automática (como el sistema)</option>
+        <option value="claro">Clara</option>
+        <option value="oscuro">Oscura</option>
+      </select>
+    </label>
+    <label>Abrir lugares y rutas en
+      <select name="mapas">
+        <option value="apple">Mapas de Apple</option>
+        <option value="google">Google Maps</option>
+      </select>
+    </label>
+    <fieldset>
+      <legend>Copia de seguridad</legend>
+      <p class="tenue">Tus viajes solo están en este dispositivo. Guarda una copia de vez en cuando.</p>
+      <div class="fila"><button type="button" class="suave" id="exportar">Exportar copia</button><button type="button" class="suave" id="importar">Importar copia</button></div>
+    </fieldset>
+    <div class="fila"><button class="fuerte">Listo</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-elegir" aria-labelledby="elegir-titulo">
+  <form method="dialog">
+    <h2 id="elegir-titulo">¿A qué viaje lo añado?</h2>
+    <div id="elegir-viaje"></div>
+    <div class="fila"><button type="button" class="suave" data-cerrar>Cancelar</button></div>
   </form>
 </dialog>
 

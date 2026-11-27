@@ -158,6 +158,106 @@ export function estimarLlegada(salida, km, desfaseOrigen, desfaseDestino) {
   return { hora: `${dosCifras(Math.floor(dia / 60))}:${dosCifras(dia % 60)}`, masDias: Math.floor(total / 1440) };
 }
 
+/** A pie si ningún tramo pasa de 3 km en línea recta. */
+export const aPie = (puntos) => puntos.slice(1).every((p, k) => distanciaKm(puntos[k], p) < 3);
+
+/** Identifica una ruta por sus puntos, redondeados a unos 10 m. */
+export const claveRuta = (puntos) => puntos.map((p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`).join(';');
+
+/** Línea de OSRM (polilínea de Google con 5 decimales) como [lon, lat]. */
+export function decodificarPolilinea(texto) {
+  const puntos = [];
+  let lat = 0;
+  let lon = 0;
+  for (let i = 0; i < texto.length;) {
+    for (const eje of [0, 1]) {
+      let valor = 0;
+      let desplazar = 0;
+      let byte;
+      do {
+        byte = texto.charCodeAt(i++) - 63;
+        valor |= (byte & 0x1f) << desplazar;
+        desplazar += 5;
+      } while (byte >= 0x20);
+      const delta = valor & 1 ? ~(valor >> 1) : valor >> 1;
+      if (eje) lon += delta; else lat += delta;
+    }
+    puntos.push([lon / 1e5, lat / 1e5]);
+  }
+  return puntos;
+}
+
+export const duracion = (min) => (min < 60 ? `${Math.max(1, Math.round(min))} min` : `${Math.floor(min / 60)} h ${dosCifras(Math.round(min % 60))}`);
+
+const DIAS_OSM = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const SELECTOR = /^((?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?(?:,(?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)*)(?:\s+|$)/;
+
+function incluyeDia(selector, dia) {
+  return selector.split(',').some((trozo) => {
+    const [a, b = a] = trozo.split('-').map((d) => DIAS_OSM.indexOf(d));
+    return a <= b ? dia >= a && dia <= b : dia >= a || dia <= b;
+  });
+}
+
+/**
+ * Horas de apertura de un día de la semana (0 = domingo) según la etiqueta opening_hours de OpenStreetMap.
+ * Devuelve [] si cierra y null si el formato es de los que no se entienden (meses, festivos, amanecer…).
+ */
+export function horarioDelDia(etiqueta, dia) {
+  const limpia = etiqueta.trim();
+  if (limpia === '24/7') return ['00:00-24:00'];
+  let resultado = null;
+  let entendidas = 0;
+  for (const regla of limpia.split(';').map((r) => r.trim()).filter(Boolean)) {
+    if (/^PH\b/.test(regla)) continue;
+    const selector = SELECTOR.exec(regla);
+    const horas = selector ? regla.slice(selector[0].length).trim() : regla;
+    const cierra = /^(off|closed)$/i.test(horas);
+    const tramos = horas.split(',').map((h) => h.trim());
+    if (!cierra && !tramos.every((h) => /^\d{2}:\d{2}-\d{2}:\d{2}\+?$/.test(h))) return null;
+    entendidas++;
+    if (selector && !incluyeDia(selector[1], dia)) continue;
+    resultado = cierra ? [] : tramos.map((h) => h.replace('+', ''));
+  }
+  return entendidas ? resultado ?? [] : null;
+}
+
+const TIEMPOS = [
+  [[0], '☀️', 'despejado'], [[1, 2], '🌤️', 'algo nuboso'], [[3], '☁️', 'nublado'], [[45, 48], '🌫️', 'niebla'],
+  [[51, 53, 55, 56, 57], '🌦️', 'llovizna'], [[61, 63, 65, 66, 67], '🌧️', 'lluvia'], [[71, 73, 75, 77], '❄️', 'nieve'],
+  [[80, 81, 82], '🌦️', 'chubascos'], [[85, 86], '🌨️', 'chubascos de nieve'], [[95, 96, 99], '⛈️', 'tormenta'],
+];
+/** Icono y palabra para un código del tiempo de la OMM. */
+export function tiempoDe(codigo) {
+  const [, icono, nombre] = TIEMPOS.find(([codigos]) => codigos.includes(codigo)) ?? [[], '🌡️', ''];
+  return { icono, nombre };
+}
+
+/** Bandera emoji de un código de país ISO de dos letras. */
+export const bandera = (pais) => (/^[A-Z]{2}$/.test(pais ?? '') ? String.fromCodePoint(...[...pais].map((c) => 0x1f1a5 + c.charCodeAt(0))) : '');
+
+const base64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const desdeBase64url = (t) => Uint8Array.from(atob(t.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const pasar = async (bytes, flujo) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(flujo)).arrayBuffer());
+
+/** Viaje comprimido para ir en un enlace. Las fotos se quitan: quien lo abra las vuelve a buscar. */
+export async function empaquetar(viaje) {
+  const { id, ...resto } = viaje;
+  const ligero = { ...resto, lugares: viaje.lugares.map(({ foto, autoria, ...l }) => l) };
+  return base64url(await pasar(new TextEncoder().encode(JSON.stringify(ligero)), new CompressionStream('deflate-raw')));
+}
+
+/** El viaje de un enlace, ya validado y con identificador nuevo; lanza un error si el enlace está roto. */
+export async function desempaquetar(texto) {
+  let datos;
+  try {
+    datos = JSON.parse(new TextDecoder().decode(await pasar(desdeBase64url(texto), new DecompressionStream('deflate-raw'))));
+  } catch {
+    throw new Error('El enlace del viaje está incompleto o roto.');
+  }
+  return validarViajes({ viajes: [datos] })[0];
+}
+
 const par = (p) => `${p.lat},${p.lon}`;
 export function enlaceLugar(app, l, destino) {
   return app === 'google'
@@ -170,9 +270,8 @@ export function enlacesRuta(app, puntos) {
   const enlaces = [];
   for (let i = 0; i < puntos.length - 1; i += 10) {
     const trozo = puntos.slice(i, i + 11);
-    const aPie = trozo.slice(1).every((p, k) => distanciaKm(trozo[k], p) < 3);
     const paradas = trozo.slice(1, -1).map(par);
-    const modo = aPie ? 'walking' : 'driving';
+    const modo = aPie(trozo) ? 'walking' : 'driving';
     if (app === 'google') {
       const q = new URLSearchParams({ api: 1, origin: par(trozo[0]), destination: par(trozo.at(-1)), travelmode: modo });
       if (paradas.length) q.set('waypoints', paradas.join('|'));
@@ -216,6 +315,48 @@ function notasValidas(notas) {
     .filter(([d, n]) => /^\d{1,2}$/.test(d) && typeof n === 'string' && n).map(([d, n]) => [d, n.slice(0, NOTA)]));
 }
 
+const sinAcentos = (t) => t.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+
+/** Pasos para convertir una palabra en otra, cortando en cuanto pasa de `tope`. */
+function distancia(a, b, tope) {
+  if (Math.abs(a.length - b.length) > tope) return tope + 1;
+  let fila = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const nueva = [i];
+    for (let j = 1; j <= b.length; j++) nueva[j] = Math.min(fila[j] + 1, nueva[j - 1] + 1, fila[j - 1] + (a[i - 1] !== b[j - 1]));
+    if (Math.min(...nueva) > tope) return tope + 1;
+    fila = nueva;
+  }
+  return fila[b.length];
+}
+
+/** Si el texto encaja con la búsqueda aunque falten acentos, haya erratas o palabras a medias. */
+export function coincide(busqueda, texto) {
+  const buscadas = sinAcentos(busqueda).match(/[\p{L}\p{N}]+/gu) ?? [];
+  const palabrasTexto = sinAcentos(texto).match(/[\p{L}\p{N}]+/gu) ?? [];
+  return buscadas.every((b) => {
+    const tope = b.length >= 8 ? 2 : b.length >= 4 ? 1 : 0;
+    return palabrasTexto.some((p) => p.startsWith(b) || (tope && distancia(b, p.slice(0, b.length + tope), tope) <= tope));
+  });
+}
+
+export const TIPOS_CONSEJO = [
+  { id: 'comida', nombre: 'Comida', icono: '🍽️' },
+  { id: 'evitar', nombre: 'Dónde no comprar', icono: '⚠️' },
+  { id: 'transporte', nombre: 'Transporte', icono: '🚇' },
+  { id: 'dinero', nombre: 'Dinero y propinas', icono: '💶' },
+  { id: 'seguridad', nombre: 'Seguridad', icono: '🛡️' },
+  { id: 'otro', nombre: 'Otros', icono: '📝' },
+];
+
+function consejosValidos(consejos) {
+  return (Array.isArray(consejos) ? consejos : []).filter((c) => typeof c?.texto === 'string' && c.texto.trim()).map((c) => ({
+    id: texto(c.id) || crypto.randomUUID(),
+    tipo: TIPOS_CONSEJO.some((t) => t.id === c.tipo) ? c.tipo : 'otro',
+    texto: c.texto.slice(0, NOTA),
+  }));
+}
+
 /** Valida datos de una copia o del almacenamiento; lanza un error si no son de Rumbo. */
 export function validarViajes(datos) {
   if (!Array.isArray(datos?.viajes)) throw new Error('El archivo no es una copia de Rumbo.');
@@ -226,6 +367,7 @@ export function validarViajes(datos) {
       id: texto(v.id) || crypto.randomUUID(),
       nombre: texto(v.nombre) || 'Viaje',
       destino: texto(v.destino),
+      pais: /^[A-Z]{2}$/.test(v.pais) ? v.pais : '',
       dias,
       zona: zonaValida(v.zona),
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(v.fecha) ? v.fecha : '',
@@ -237,6 +379,7 @@ export function validarViajes(datos) {
       })),
       nota: texto(v.nota, NOTA),
       notasDia: notasValidas(v.notasDia),
+      consejos: consejosValidos(v.consejos),
       lugares: v.lugares.map((l) => {
         if (!coordenadas(l)) {
           throw new Error('La copia tiene un lugar sin coordenadas válidas.');
@@ -252,6 +395,8 @@ export function validarViajes(datos) {
           foto: typeof l.foto === 'string' ? urlDe(l.foto, ['upload.wikimedia.org', 'thumb.wikimedia.org']) : undefined,
           autoria: urlDe(texto(l.autoria, 1000), ['commons.wikimedia.org']),
           nota: texto(l.nota, NOTA),
+          // Igual que la foto: sin definir es que aún no se ha buscado.
+          horario: typeof l.horario === 'string' ? l.horario.slice(0, 300) : undefined,
           dia: Number.isInteger(l.dia) && l.dia >= 1 && l.dia <= dias ? l.dia : 0,
         };
       }),

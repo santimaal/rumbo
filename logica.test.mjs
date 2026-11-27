@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos } from './logica.js';
+import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar } from './logica.js';
 
 assert.deepEqual(
   extraerLugares('Lo mejor de Roma 😍\n📍 Trattoria Da Enzo - la mejor pasta\n📍Panteón 📍 Coliseo (reserva!)\n#roma #viajes'),
@@ -79,3 +79,47 @@ const [antiguo] = validarViajes({ viajes: [{ dias: 2, lugares: [], ida: { salida
 assert.deepEqual([antiguo.ida.salida, antiguo.ida.desde, antiguo.hoteles.length, antiguo.hoteles[0].desde, antiguo.notasDia, antiguo.fecha], ['', null, 1, 2, { 1: 'hola' }, '']);
 assert.deepEqual(validarViajes({ viajes: [{ dias: 1, lugares: [] }] })[0].hoteles, []);
 console.log('todo correcto');
+
+// Buscador de consejos: tolera acentos, erratas y palabras a medias.
+assert.ok(coincide('restaurnte', 'El mejor restaurante del barrio'));
+assert.ok(coincide('cafe', 'Café con churros'));
+assert.ok(coincide('mercad', 'No compres en el mercado central'));
+assert.ok(coincide('', 'cualquier cosa'));
+assert.ok(!coincide('taxi', 'Pide el menú del día'));
+assert.ok(!coincide('bar', 'Ve en tren'));
+assert.equal(validarViajes({ viajes: [{ lugares: [], consejos: [{ tipo: 'raro', texto: 'x' }, { texto: ' ' }] }] })[0].consejos[0].tipo, 'otro');
+
+// Horarios de OpenStreetMap: 0 es domingo.
+assert.deepEqual(horarioDelDia('Mo-Fr 09:00-18:00; Sa 10:00-14:00', 1), ['09:00-18:00']);
+assert.deepEqual(horarioDelDia('Mo-Fr 09:00-18:00; Sa 10:00-14:00', 6), ['10:00-14:00']);
+assert.deepEqual(horarioDelDia('Mo-Fr 09:00-18:00; Sa 10:00-14:00', 0), []);
+assert.deepEqual(horarioDelDia('Tu-Su 09:00-13:00,16:00-20:00; Mo off', 1), []);
+assert.deepEqual(horarioDelDia('Tu-Su 09:00-13:00,16:00-20:00; PH off', 3), ['09:00-13:00', '16:00-20:00']);
+assert.deepEqual(horarioDelDia('Fr-Mo 20:00-02:00', 0), ['20:00-02:00']);
+assert.deepEqual(horarioDelDia('09:00-21:00; Su off', 2), ['09:00-21:00']);
+assert.deepEqual(horarioDelDia('24/7', 4), ['00:00-24:00']);
+assert.equal(horarioDelDia('Apr-Oct Mo-Su 09:00-19:00', 2), null);
+assert.equal(horarioDelDia('sunrise-sunset', 2), null);
+
+// Polilínea de ejemplo de la documentación de Google.
+assert.deepEqual(decodificarPolilinea('_p~iF~ps|U_ulLnnqC_mqNvxq`@'), [[-120.2, 38.5], [-120.95, 40.7], [-126.453, 43.252]]);
+assert.equal(claveRuta([{ lat: 41.123456, lon: 2.1 }, { lat: 0, lon: -3 }]), '41.1235,2.1000;0.0000,-3.0000');
+assert.equal(duracion(42), '42 min');
+assert.equal(duracion(125), '2 h 05');
+assert.equal(tiempoDe(61).nombre, 'lluvia');
+assert.equal(tiempoDe(1234).icono, '🌡️');
+
+assert.equal(bandera('ES'), '🇪🇸');
+assert.equal(bandera(''), '');
+
+// Un viaje compartido por enlace vuelve igual, sin fotos y con otro identificador.
+const original = validarViajes({ viajes: [{ id: 'x', nombre: 'Roma', destino: 'Roma, Italia', pais: 'IT', dias: 2, consejos: [{ tipo: 'comida', texto: 'Cacio e pepe' }],
+  lugares: [{ nombre: 'Coliseo', lat: 41.89, lon: 12.49, dia: 1, foto: 'https://upload.wikimedia.org/a.jpg', horario: 'Mo-Su 09:00-19:00' }] }] })[0];
+const enlace = await empaquetar(original);
+assert.match(enlace, /^[\w-]+$/);
+const recibido = await desempaquetar(enlace);
+assert.notEqual(recibido.id, 'x');
+assert.equal(recibido.lugares[0].foto, undefined);
+assert.deepEqual({ ...recibido, id: 'x', lugares: [] }, { ...original, lugares: [] });
+assert.equal(recibido.lugares[0].horario, 'Mo-Su 09:00-19:00');
+await assert.rejects(desempaquetar('basura'));

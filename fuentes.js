@@ -1,4 +1,4 @@
-import { distanciaKm, enZona, estimarLlegada, parecido } from './logica.js';
+import { distanciaKm, enZona, estimarLlegada, parecido, decodificarPolilinea } from './logica.js';
 
 export const IDIOMA = (navigator.language || 'es').split('-')[0];
 
@@ -8,8 +8,9 @@ const turnos = {};
 // Son servicios gratuitos que cortan las ráfagas: peticiones espaciadas por servidor y un reintento.
 async function pedir(url, params, pausa, reintento = false) {
   const ahora = Date.now();
-  const turno = Math.max(ahora, turnos[url] ?? 0);
-  turnos[url] = turno + pausa;
+  const { host } = new URL(url);
+  const turno = Math.max(ahora, turnos[host] ?? 0);
+  turnos[host] = turno + pausa;
   await espera(turno - ahora);
   try {
     const r = await fetch(`${url}?${new URLSearchParams(params)}`, { signal: AbortSignal.timeout(12000) });
@@ -36,6 +37,7 @@ export async function buscarCiudades(texto) {
         nombre: r.name,
         region: r.admin1 && r.admin1 !== r.name ? r.admin1 : '',
         destino: esPais || !r.country ? r.name : `${r.name}, ${r.country}`,
+        pais: r.country_code ?? '',
         zona: {
           lat: r.latitude,
           lon: r.longitude,
@@ -197,10 +199,11 @@ export async function calcularLlegada({ salida, desde, hasta }, fecha) {
   return estimarLlegada(salida, distanciaKm(desde, hasta), a, b);
 }
 
-let estilo;
+const estilos = {};
 /** Estilo del mapa con los rótulos en el idioma del dispositivo; si no hay traducción, el nombre local. */
-export function estiloMapa() {
-  estilo ??= pedir('https://tiles.openfreemap.org/styles/bright', {}, 0).then((e) => {
+export function estiloMapa(oscuro = false) {
+  const nombre = oscuro ? 'dark' : 'bright';
+  estilos[nombre] ??= pedir(`https://tiles.openfreemap.org/styles/${nombre}`, {}, 0).then((e) => {
     for (const { layout } of e.layers) {
       if (layout && JSON.stringify(layout['text-field'] ?? '').includes('name')) {
         layout['text-field'] = ['coalesce', ['get', `name:${IDIOMA}`], ['get', 'name:latin'], ['get', 'name']];
@@ -208,8 +211,49 @@ export function estiloMapa() {
     }
     return e;
   }).catch((error) => {
-    estilo = undefined;
+    delete estilos[nombre];
     throw error;
   });
-  return estilo;
+  return estilos[nombre];
+}
+
+/** Ruta real a pie o en coche por las calles, con su línea para el mapa. */
+export async function rutaReal(puntos, aPie) {
+  const perfil = aPie ? 'routed-foot' : 'routed-car';
+  const coordenadas = puntos.map((p) => `${p.lon},${p.lat}`).join(';');
+  const datos = await pedir(`https://routing.openstreetmap.de/${perfil}/route/v1/driving/${coordenadas}`, { overview: 'simplified', geometries: 'polyline' }, 1100);
+  const [ruta] = datos?.routes ?? [];
+  if (!ruta) return null;
+  return { km: ruta.distance / 1000, min: ruta.duration / 60, modo: aPie ? 'pie' : 'coche', linea: decodificarPolilinea(ruta.geometry) };
+}
+
+const nombresOsm = (tags) => Object.entries(tags).filter(([k]) => k === 'name' || k.startsWith('name:')).map(([, v]) => v);
+
+/** Horario de OpenStreetMap de cada lugar: el de algo a menos de 80 m con un nombre parecido, o vacío. */
+export async function buscarHorarios(lugares) {
+  const horarios = new Map();
+  for (let i = 0; i < lugares.length; i += 20) {
+    const tanda = lugares.slice(i, i + 20);
+    const consulta = `[out:json][timeout:20];(${tanda.map((l) => `nwr(around:80,${l.lat},${l.lon})["opening_hours"];`).join('')});out center;`;
+    const { elements = [] } = await pedir('https://overpass-api.de/api/interpreter', { data: consulta }, 1500);
+    for (const l of tanda) {
+      const [mejor] = elements
+        .map((e) => ({ e, nota: Math.max(0, ...nombresOsm(e.tags ?? {}).map((n) => parecido(l.nombre, n))) }))
+        .filter(({ e, nota }) => nota >= 0.5 && distanciaKm(l, { lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon }) < 0.08)
+        .sort((a, b) => b.nota - a.nota);
+      horarios.set(l.id, mejor?.e.tags.opening_hours ?? '');
+    }
+  }
+  return horarios;
+}
+
+/** Previsión por fecha (AAAA-MM-DD) entre dos días; Open-Meteo solo llega a 16 días vista. */
+export async function prevision(zona, desde, hasta) {
+  const { daily } = await pedir('https://api.open-meteo.com/v1/forecast', {
+    latitude: zona.lat, longitude: zona.lon, timezone: 'auto', start_date: desde, end_date: hasta,
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+  }, 200);
+  return Object.fromEntries(daily.time.map((fecha, i) => [fecha, {
+    codigo: daily.weather_code[i], max: daily.temperature_2m_max[i], min: daily.temperature_2m_min[i], lluvia: daily.precipitation_probability_max[i],
+  }]));
 }
