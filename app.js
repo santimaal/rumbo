@@ -1,7 +1,7 @@
 import {
   extraerLugares, parecido, organizar, distanciaKm, largo, extremosDelDia, minutosUtiles, enlaceLugar, enlacesRuta,
   enlaceSeguro, fotoDe, diasValidos, validarViajes, TIPOS_CONSEJO, coincide, tramosRuta, claveRuta, duracion, horarioDelDia, tiempoDe, bandera,
-  empaquetar, desempaquetar,
+  empaquetar, desempaquetar, mismoViaje, actualizarViaje,
 } from './logica.js';
 import {
   IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, buscarHorarios, prevision,
@@ -13,7 +13,8 @@ const COLORES = ['#c2362b', '#1f6fb2', '#2f7d3b', '#8a3fa8', '#a85a00', '#00757a
 const color = (dia) => (dia ? COLORES[(dia - 1) % COLORES.length] : '#5d7079');
 const $ = (id) => document.getElementById(id);
 const CLAVE_MAPAS = 'rumbo-mapas';
-const appMapas = () => (['google', 'waze'].includes(localStorage.getItem(CLAVE_MAPAS)) ? localStorage.getItem(CLAVE_MAPAS) : 'apple');
+// Google Maps por defecto: es el único que abre la ruta con todas las paradas.
+const appMapas = () => (['apple', 'waze'].includes(localStorage.getItem(CLAVE_MAPAS)) ? localStorage.getItem(CLAVE_MAPAS) : 'google');
 
 let temporizador;
 let viajes = cargar();
@@ -1261,6 +1262,16 @@ async function recibirViaje() {
   history.replaceState(null, '', location.pathname);
   try {
     const v = await desempaquetar(paquete);
+    // Un enlace del mismo viaje que ya está guardado lo actualiza en vez de añadirlo otra vez.
+    const mio = mismoViaje(viajes, v);
+    if (mio) {
+      if (!confirm(`Ya tienes «${mio.nombre}». ¿Lo actualizo con los cambios de este enlace? Lo que tengas en tu copia se sustituirá.`)) return;
+      actualizarViaje(mio, v);
+      guardar();
+      ir(mio.id);
+      avisar('Viaje actualizado.');
+      return;
+    }
     if (!confirm(`¿Añadir «${v.nombre}» (${v.destino}) a tus viajes?`)) return;
     viajes.unshift(v);
     guardar();
@@ -1336,6 +1347,8 @@ $('archivo').onchange = async (e) => {
 ponerTema(document.documentElement.dataset.tema);
 gestoAtras();
 recibirViaje();
+// Si Rumbo ya estaba abierto, un enlace nuevo solo cambia lo que va tras # y no recarga la página.
+addEventListener('hashchange', recibirViaje);
 recibirPublicacion();
 navigator.storage?.persist?.();
 vigilarVersiones();

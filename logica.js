@@ -251,10 +251,13 @@ const base64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, 
 const desdeBase64url = (t) => Uint8Array.from(atob(t.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 const pasar = async (bytes, flujo) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(flujo)).arrayBuffer());
 
-/** Viaje comprimido para ir en un enlace. Las fotos se quitan: quien lo abra las vuelve a buscar. */
+/**
+ * Viaje comprimido para ir en un enlace. Las fotos se quitan: quien lo abra las vuelve a buscar.
+ * `origen` es el viaje del que salió la primera copia, para reconocerlo si se vuelve a compartir.
+ */
 export async function empaquetar(viaje) {
   const { id, ...resto } = viaje;
-  const ligero = { ...resto, lugares: viaje.lugares.map(({ foto, autoria, ...l }) => l) };
+  const ligero = { ...resto, origen: viaje.origen || id, lugares: viaje.lugares.map(({ foto, autoria, ...l }) => l) };
   return base64url(await pasar(new TextEncoder().encode(JSON.stringify(ligero)), new CompressionStream('deflate-raw')));
 }
 
@@ -386,6 +389,7 @@ export function validarViajes(datos) {
     const dias = diasValidos(v.dias);
     return {
       id: texto(v.id) || crypto.randomUUID(),
+      origen: texto(v.origen, 100),
       nombre: texto(v.nombre) || 'Viaje',
       destino: texto(v.destino),
       pais: /^[A-Z]{2}$/.test(v.pais) ? v.pais : '',
@@ -425,4 +429,17 @@ export function validarViajes(datos) {
       }),
     };
   });
+}
+
+/** El viaje guardado que corresponde a uno recibido por enlace: el original o una copia anterior del mismo. */
+export const mismoViaje = (viajes, recibido) => viajes.find((v) => v.id === recibido.origen || (v.origen && v.origen === recibido.origen));
+
+/** Pone en `mio` los datos de un viaje recibido, sin perder su identificador, sus fotos ni los días que tenía ocultos. */
+export function actualizarViaje(mio, recibido) {
+  const antes = new Map(mio.lugares.map((l) => [l.id, l]));
+  for (const l of recibido.lugares) {
+    const previo = antes.get(l.id);
+    if (previo?.foto !== undefined) Object.assign(l, { foto: previo.foto, autoria: previo.autoria });
+  }
+  Object.assign(mio, { ...recibido, id: mio.id, origen: mio.origen, ocultos: mio.ocultos.filter((d) => d <= recibido.dias) });
 }

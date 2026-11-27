@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar } from './logica.js';
+import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje } from './logica.js';
 
 assert.deepEqual(
   extraerLugares('Lo mejor de Roma 😍\n📍 Trattoria Da Enzo - la mejor pasta\n📍Panteón 📍 Coliseo (reserva!)\n#roma #viajes'),
@@ -120,7 +120,7 @@ assert.match(enlace, /^[\w-]+$/);
 const recibido = await desempaquetar(enlace);
 assert.notEqual(recibido.id, 'x');
 assert.equal(recibido.lugares[0].foto, undefined);
-assert.deepEqual({ ...recibido, id: 'x', lugares: [] }, { ...original, lugares: [] });
+assert.deepEqual({ ...recibido, id: 'x', lugares: [] }, { ...original, origen: 'x', lugares: [] });
 assert.equal(recibido.lugares[0].horario, 'Mo-Su 09:00-19:00');
 await assert.rejects(desempaquetar('basura'));
 
@@ -136,3 +136,26 @@ assert.match(enlaceLugar('waze', p('', 41.9, 12.5), 'Roma'), /^https:\/\/waze\.c
 assert.equal(fotoDe('https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo.jpg/500px-Colosseo.jpg', 250),
   'https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo.jpg/250px-Colosseo.jpg');
 assert.equal(fotoDe('https://upload.wikimedia.org/wikipedia/commons/d/de/Colosseo.jpg', 250), 'https://upload.wikimedia.org/wikipedia/commons/d/de/Colosseo.jpg');
+
+// Volver a compartir el mismo viaje actualiza la copia en vez de duplicarla, en los dos sentidos.
+const copia = await desempaquetar(await empaquetar(original));
+assert.equal(copia.origen, 'x');
+assert.equal(mismoViaje([original], copia), original);
+const deVuelta = await desempaquetar(await empaquetar(copia));
+assert.equal(deVuelta.origen, 'x');
+assert.equal(mismoViaje([copia], deVuelta), copia);
+assert.equal(mismoViaje([validarViajes({ viajes: [{ id: 'otro', lugares: [] }] })[0]], copia), undefined);
+
+const mia = validarViajes({ viajes: [{ id: 'mia', origen: 'x', nombre: 'Roma', dias: 3, ocultos: [1, 3],
+  lugares: [{ id: 'col', nombre: 'Coliseo', lat: 41.89, lon: 12.49, dia: 1, foto: 'https://upload.wikimedia.org/c.jpg', autoria: 'https://commons.wikimedia.org/wiki/File:c.jpg' }] }] })[0];
+const cambios = validarViajes({ viajes: [{ origen: 'x', nombre: 'Roma y Ostia', dias: 2, consejos: [{ tipo: 'comida', texto: 'Supplì' }],
+  lugares: [{ id: 'col', nombre: 'Coliseo', lat: 41.89, lon: 12.49, dia: 2 }, { id: 'ost', nombre: 'Ostia', lat: 41.75, lon: 12.29, dia: 1 }] }] })[0];
+actualizarViaje(mia, cambios);
+assert.equal(mia.id, 'mia');
+assert.equal(mia.nombre, 'Roma y Ostia');
+assert.deepEqual(mia.ocultos, [1]);
+assert.equal(mia.lugares.length, 2);
+assert.equal(mia.lugares[0].foto, 'https://upload.wikimedia.org/c.jpg');
+assert.equal(mia.lugares[0].dia, 2);
+assert.equal(mia.lugares[1].foto, undefined);
+assert.equal(mia.consejos[0].texto, 'Supplì');

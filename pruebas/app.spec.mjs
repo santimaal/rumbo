@@ -329,3 +329,49 @@ test.describe('instalada en el móvil', () => {
     await expect(page.locator('#vista')).toHaveAttribute('style', /transform: none|^$|transform: ;/);
   });
 });
+
+test('volver a compartir un viaje actualiza la copia de la otra persona', async ({ page, browser }) => {
+  await sinRed(page);
+  await page.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1)] })]);
+  const compartir = async () => {
+    await page.evaluate(() => { window.compartido = null; });
+    await page.getByRole('button', { name: 'Compartir viaje' }).click();
+    return page.waitForFunction(() => window.compartido).then((h) => h.jsonValue());
+  };
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  const primero = await compartir();
+
+  const otro = await browser.newPage();
+  await sinRed(otro);
+  const preguntas = [];
+  otro.on('dialog', (d) => { preguntas.push(d.message()); d.accept(); });
+  await otro.goto(primero);
+  await expect(otro.getByRole('heading', { name: 'Roma' })).toBeVisible();
+
+  // Quien lo compartió añade un consejo y vuelve a mandar el enlace.
+  await page.getByRole('button', { name: /Notas y consejos/ }).click();
+  await page.getByRole('button', { name: '+ Consejo' }).click();
+  await page.getByLabel('Consejo', { exact: true }).fill('Reservar el Coliseo con antelación');
+  await page.getByRole('button', { name: 'Guardar' }).click();
+  await page.getByRole('button', { name: '‹ Roma' }).click();
+  const segundo = await compartir();
+
+  await otro.goto(segundo);
+  await expect(otro.getByRole('button', { name: /Notas y consejos.*1 consejo/ })).toBeVisible();
+  expect(preguntas.at(-1)).toContain('Ya tienes «Roma»');
+  expect((await guardados(otro)).length).toBe(1);
+});
+
+test('por defecto los lugares y las rutas se abren en Google Maps', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Coliseo' })).toHaveAttribute('href', /^https:\/\/www\.google\.com\/maps\//);
+  await expect(page.locator('a.ruta').first()).toHaveAttribute('href', /^https:\/\/www\.google\.com\/maps\/dir\//);
+  await page.getByRole('button', { name: '‹ Viajes' }).click();
+  await page.getByRole('button', { name: 'Ajustes' }).click();
+  await expect(page.getByLabel('Abrir lugares y rutas en')).toHaveValue('google');
+});
