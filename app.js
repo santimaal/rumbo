@@ -346,7 +346,7 @@ function textoRuta(real) {
 const llegadas = (real) => [null, ...real.tramos.flatMap((t) => t.piernas.map((p) => ({ ...p, modo: t.modo })))];
 function lineaTramo(llegada) {
   if (!llegada) return null;
-  return el('small', { className: `tramo ${llegada.modo}`, textContent: `${MODOS[llegada.modo]} ${duracion(llegada.min)} · ${kmTexto(llegada.km)}` });
+  return el('small', { className: `tramo tramo-${llegada.modo}`, textContent: `${MODOS[llegada.modo]} ${duracion(llegada.min)} · ${kmTexto(llegada.km)}` });
 }
 
 function lineaHorario(v, l) {

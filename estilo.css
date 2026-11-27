@@ -107,7 +107,7 @@ button:disabled { opacity: .45; cursor: default; }
 .abrir-consejos small { flex: 1; }
 .abrir-consejos span:last-child { font-size: 22px; color: var(--tenue); }
 .tramo { display: block; margin: -2px 0 4px; font-weight: 600; }
-.tramo.coche { color: var(--tinta); }
+.tramo-coche { color: var(--tinta); }
 #actualizacion { position: fixed; left: 16px; right: 16px; top: calc(env(safe-area-inset-top) + 12px); max-width: 480px; margin: auto; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 16px; border-radius: 14px; background: var(--tinta); color: var(--fondo); box-shadow: 0 4px 16px #0004; }
 #actualizacion[hidden] { display: none; }
 #actualizacion span { flex: 1; }

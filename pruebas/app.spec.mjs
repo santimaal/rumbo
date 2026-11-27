@@ -126,6 +126,11 @@ test('cada día muestra ruta real, tiempo y horarios', async ({ page }) => {
   await expect(dia1).toContainText('🚗 16 km (30 min) + 🚶 600 m (8 min)');
   await expect(dia1.locator('.parada', { hasText: 'Coliseo' }).locator('.tramo')).toHaveText('🚗 15 min · 8 km');
   await expect(dia1.locator('.parada', { hasText: 'Panteón' }).locator('.tramo')).toHaveText('🚶 8 min · 600 m');
+  // La línea del tramo no puede tapar el nombre de la parada.
+  const panteon = dia1.locator('.parada', { hasText: 'Panteón' });
+  const tramo = await panteon.locator('.tramo').boundingBox();
+  const nombre = await panteon.locator('.titulo').boundingBox();
+  expect(tramo.y + tramo.height).toBeLessThanOrEqual(nombre.y);
   await expect(dia1.locator('a.ruta')).toHaveText(['🚗 Ruta 1', '🚶 Ruta 2', '🚗 Ruta 3']);
   await expect(dia1).toContainText('🌧️ 24°/15° lluvia, 70% lluvia');
   await expect(dia1).toContainText('Ese día abre 09:00–19:00');
