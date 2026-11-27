@@ -230,6 +230,31 @@ export async function rutaReal(puntos, aPie) {
   };
 }
 
+const OVERPASS = 'https://overpass-api.de/api/interpreter';
+const AMENIDADES = { restaurant: 'comida', fast_food: 'comida', food_court: 'comida', cafe: 'cafe', bar: 'copas', pub: 'copas', biergarten: 'copas', ice_cream: 'helado' };
+
+/** Restaurantes, cafés, bares y heladerías con nombre a menos de 400 m de alguno de los puntos. */
+export async function buscarComida(puntos) {
+  const tipos = Object.keys(AMENIDADES).join('|');
+  const consulta = `[out:json][timeout:25];(${puntos.slice(0, 15).map((p) => `nwr(around:400,${p.lat},${p.lon})["amenity"~"^(${tipos})$"]["name"];`).join('')});out center 400;`;
+  const { elements = [] } = (await pedir(OVERPASS, { data: consulta }, 1500)) ?? {};
+  const vistos = new Set();
+  return elements.flatMap(({ type, id, lat, lon, center, tags = {} }) => {
+    const clave = `${type}${id}`;
+    if (vistos.has(clave) || !AMENIDADES[tags.amenity]) return [];
+    vistos.add(clave);
+    return [{
+      nombre: tags[`name:${IDIOMA}`] || tags.name,
+      direccion: [[tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' '), tags['addr:city']].filter(Boolean).join(', '),
+      lat: lat ?? center?.lat,
+      lon: lon ?? center?.lon,
+      tipo: AMENIDADES[tags.amenity],
+      cocina: tags.cuisine ?? '',
+      horario: tags.opening_hours ?? '',
+    }];
+  }).filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon));
+}
+
 const nombresOsm = (tags) => Object.entries(tags).filter(([k]) => k === 'name' || k.startsWith('name:')).map(([, v]) => v);
 
 /** Horario de OpenStreetMap de cada lugar: el de algo a menos de 80 m con un nombre parecido, o vacío. */
@@ -238,7 +263,7 @@ export async function buscarHorarios(lugares) {
   for (let i = 0; i < lugares.length; i += 20) {
     const tanda = lugares.slice(i, i + 20);
     const consulta = `[out:json][timeout:20];(${tanda.map((l) => `nwr(around:80,${l.lat},${l.lon})["opening_hours"];`).join('')});out center;`;
-    const { elements = [] } = await pedir('https://overpass-api.de/api/interpreter', { data: consulta }, 1500);
+    const { elements = [] } = await pedir(OVERPASS, { data: consulta }, 1500);
     for (const l of tanda) {
       const [mejor] = elements
         .map((e) => ({ e, nota: Math.max(0, ...nombresOsm(e.tags ?? {}).map((n) => parecido(l.nombre, n))) }))

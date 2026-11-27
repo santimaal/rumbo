@@ -175,7 +175,7 @@ test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ 
   await otro.goto(url);
   await expect(otro.getByRole('heading', { name: 'Roma' })).toBeVisible();
   await expect(otro.getByRole('button', { name: /Notas y consejos.*1 consejo/ })).toBeVisible();
-  await expect(otro.getByText('Coliseo')).toBeVisible();
+  await expect(otro.getByRole('link', { name: 'Coliseo' })).toBeVisible();
   expect(new URL(otro.url()).hash).toBe('');
 });
 
@@ -185,6 +185,7 @@ test('lo compartido desde otra app abre el formulario de lugares', async ({ page
   const texto = 'Lo mejor de Lisboa\n📍 Miradouro da Graça\n📍 Time Out Market https://www.instagram.com/reel/abc';
   await page.goto(`/?compartir&${new URLSearchParams({ texto })}`);
   await page.getByRole('dialog').getByRole('button', { name: /Lisboa/ }).click();
+  await page.getByRole('button', { name: /Buscar lugares/ }).click();
   await expect(page.getByRole('heading', { name: 'Añadir lugares' })).toBeVisible();
   await expect(page.getByLabel('Enlace del reel o TikTok (opcional)')).toHaveValue('https://www.instagram.com/reel/abc');
   await expect(page.getByLabel('Texto de la publicación')).toHaveValue(/📍 Miradouro da Graça/);
@@ -395,4 +396,91 @@ test('un reel se puede guardar como consejo con su enlace', async ({ page }) => 
   await page.getByRole('button', { name: /Notas y consejos/ }).click();
   await expect(page.getByRole('link', { name: '▶ Ver vídeo' })).toHaveAttribute('href', 'https://www.tiktok.com/@roma/video/123');
   expect((await guardados(page))[0].consejos[0]).toMatchObject({ tipo: 'comida', enlace: 'https://www.tiktok.com/@roma/video/123' });
+});
+
+test('lo compartido se puede guardar como nota de un sitio del viaje', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
+  await page.goto(`/?compartir&${new URLSearchParams({ texto: 'Entrad por la puerta de Via Sacra, hay menos cola https://www.tiktok.com/@roma/video/9' })}`);
+  await page.getByRole('button', { name: /Nota de un sitio/ }).click();
+  await page.getByRole('dialog').getByRole('button', { name: /Coliseo/ }).click();
+  await expect(page.getByRole('heading', { name: 'Nota de Coliseo' })).toBeVisible();
+  await expect(page.locator('#form-nota textarea')).toHaveValue(/Via Sacra[\s\S]*tiktok\.com/);
+  await page.locator('#form-nota').getByRole('button', { name: 'Guardar' }).click();
+  const coliseo = (await guardados(page))[0].lugares.find((l) => l.id === 'a');
+  expect(coliseo.nota).toContain('Via Sacra');
+  expect(coliseo.enlace).toBe('https://www.tiktok.com/@roma/video/9');
+  await expect(page.locator('.parada', { hasText: 'Coliseo' }).getByRole('link', { name: 'Vídeo' })).toBeVisible();
+});
+
+test('los lugares tienen categoría y se puede filtrar por ella', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Trattoria Da Enzo', 41.8886, 12.4772, 1), lugar('c', 'Museos Vaticanos', 41.9065, 12.4536, 2)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Categoría de Trattoria Da Enzo: Comer' })).toBeVisible();
+
+  await page.getByRole('button', { name: '🍽️ Comer', exact: true }).click();
+  await expect(page.locator('.parada', { hasText: 'Trattoria' })).toBeVisible();
+  await expect(page.locator('.parada', { hasText: 'Coliseo' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Todos' }).click();
+  await expect(page.locator('.parada', { hasText: 'Coliseo' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Categoría de Coliseo: Monumentos' }).click();
+  await page.getByRole('button', { name: '🌄 Miradores' }).click();
+  await expect(page.getByRole('button', { name: 'Categoría de Coliseo: Miradores' })).toBeVisible();
+  expect((await guardados(page))[0].lugares.find((l) => l.id === 'a').tipo).toBe('mirador');
+});
+
+test('busca dónde comer cerca de la ruta y lo mete entre las paradas', async ({ page }) => {
+  await sinRed(page, { horarios: [
+    { type: 'node', id: 1, lat: 41.8912, lon: 12.4890, tags: { amenity: 'restaurant', name: 'Osteria del Foro', cuisine: 'italian;pizza', opening_hours: '12:00-23:00' } },
+    { type: 'node', id: 2, lat: 41.8990, lon: 12.4780, tags: { amenity: 'cafe', name: 'Tazza Doro', opening_hours: '07:00-20:00' } },
+    { type: 'node', id: 3, lat: 41.9500, lon: 12.6000, tags: { amenity: 'bar', name: 'Bar Lontano' } },
+  ] });
+  await sembrar(page, [viaje({ fecha: hoy, lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.locator('.dia').first().getByRole('button', { name: '🍽️ Comer cerca' }).click();
+  const dialogo = page.getByRole('dialog', { name: /Comer cerca/ });
+  await expect(dialogo.getByText('Osteria del Foro')).toBeVisible();
+  await expect(dialogo.getByText(/italiana, pizza · a .* de Coliseo · abre 12:00–23:00/)).toBeVisible();
+  await dialogo.getByText('Osteria del Foro').click();
+  await dialogo.getByRole('button', { name: 'Añadir a la ruta' }).click();
+  // Queda entre el Coliseo y el Panteón, que es donde menos se desvía.
+  await expect.poll(async () => (await guardados(page))[0].lugares.map((l) => l.nombre)).toEqual(['Coliseo', 'Osteria del Foro', 'Panteón']);
+  const osteria = (await guardados(page))[0].lugares[1];
+  expect(osteria).toMatchObject({ dia: 1, tipo: 'comida', horario: '12:00-23:00' });
+});
+
+test('organizar pregunta si todo el viaje o solo el orden de cada día', async ({ page }) => {
+  await sinRed(page);
+  // El día 1 está desordenado y el Vaticano, lejos, está en el día 1 aunque encajaría mejor en otro.
+  await sembrar(page, [viaje({ lugares: [
+    lugar('c', 'Panteón', 41.8986, 12.4769, 1), lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Foro Romano', 41.8925, 12.4853, 1),
+    lugar('v', 'Museos Vaticanos', 41.9065, 12.4536, 2)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Organizar' }).click();
+  await expect(page.getByRole('button', { name: /Todo el viaje/ })).toBeVisible();
+  await page.getByRole('button', { name: /Cada día por separado/ }).click();
+  await expect.poll(async () => (await guardados(page))[0].lugares.map((l) => `${l.id}${l.dia}`).filter((x) => x.endsWith('1')).join())
+    .toMatch(/^(a1,b1,c1|c1,b1,a1)$/);
+  const tras = (await guardados(page))[0].lugares;
+  expect(tras.find((l) => l.id === 'v').dia).toBe(2);
+});
+
+test('cada parada muestra su hora y avisa de cuándo toca comer', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ dias: 1, lugares: [
+    lugar('a', 'Museos Vaticanos', 41.9065, 12.4536, 1), lugar('b', 'Castel Sant Angelo', 41.9031, 12.4663, 1, { tipo: 'monumento' })] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  const vaticano = page.locator('.parada', { hasText: 'Museos Vaticanos' });
+  await expect(vaticano.locator('.horas')).toHaveText('🕐 09:00–11:00 · 2 h 00');
+  await vaticano.locator('.horas').click();
+  await page.getByRole('button', { name: '3 h 00' }).click();
+  await expect(vaticano.locator('.horas')).toHaveText('🕐 09:00–12:00 · 3 h 00');
+  await expect(page.locator('.aviso-comida').first()).toContainText('hora de comer cerca de Castel Sant Angelo');
+  expect((await guardados(page))[0].lugares[0].estancia).toBe(180);
 });

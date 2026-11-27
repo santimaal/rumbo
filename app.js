@@ -1,10 +1,11 @@
 import {
   extraerLugares, parecido, organizar, distanciaKm, largo, extremosDelDia, minutosUtiles, enlaceLugar, enlacesRuta,
   enlaceSeguro, fotoDe, diasValidos, validarViajes, TIPOS_CONSEJO, coincide, tramosRuta, claveRuta, duracion, horarioDelDia, tiempoDe, bandera,
-  empaquetar, desempaquetar, mismoViaje, actualizarViaje,
+  empaquetar, desempaquetar, mismoViaje, actualizarViaje, CATEGORIAS, adivinarCategoria, mejorHueco,
+  ordenarDias, estanciaDe, minutosTramo, hora, agenda,
 } from './logica.js';
 import {
-  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, buscarHorarios, prevision,
+  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, buscarHorarios, prevision, buscarComida,
 } from './fuentes.js';
 
 const CLAVE = 'rumbo';
@@ -20,6 +21,8 @@ let temporizador;
 let viajes = cargar();
 let abierto = null;
 let pantalla = null;
+let filtro = null;
+const categoria = (id) => CATEGORIAS.find((c) => c.id === id) ?? CATEGORIAS.at(-1);
 let mapa = null;
 
 function cargar() {
@@ -88,6 +91,7 @@ const nivel = (id, a) => (a ? 2 : id ? 1 : 0);
 
 /** Cambia de pantalla anotándola en el historial, para que el gesto y el botón de atrás vuelvan a la anterior. */
 function ir(id, a = null) {
+  if (id !== abierto) filtro = null;
   const estado = { abierto: id, pantalla: a, nivel: nivel(id, a) };
   if (estado.nivel > (history.state?.nivel ?? 0)) history.pushState(estado, '');
   else history.replaceState(estado, '');
@@ -206,6 +210,7 @@ function pintarViaje(v) {
       el('span', { textContent: '📝 Notas y consejos' }),
       el('small', { textContent: [v.nota ? 'nota' : '', v.consejos.length ? plural(v.consejos.length, 'consejo', 'consejos') : ''].filter(Boolean).join(' · ') || 'vacío' }),
       el('span', { ariaHidden: 'true', textContent: '›' })),
+    filtrosCategoria(v),
     divMapa,
     v.lugares.length ? null : el('p', { textContent: 'Aún no hay lugares. Mira las ideas o pega el texto de una publicación.' }),
     sueltos.length ? seccionDia(v, 0, sueltos) : null,
@@ -370,6 +375,18 @@ function lineaVuelo(v, dia) {
   return lineas.map((l) => el('p', { className: 'vuelo', textContent: `\u2708\uFE0E ${l.filter(Boolean).join(' · ')}` }));
 }
 
+/** Botones para ver solo una categoría; aparecen cuando el viaje tiene lugares de más de una. */
+function filtrosCategoria(v) {
+  const presentes = CATEGORIAS.filter((c) => v.lugares.some((l) => l.tipo === c.id));
+  if (presentes.length < 2) return null;
+  const chip = (texto, id) => el('button', {
+    type: 'button', className: 'chip', textContent: texto, ariaPressed: String(filtro === id),
+    onclick: () => { filtro = filtro === id ? null : id; pintar(); },
+  });
+  return el('div', { className: 'filtros', role: 'group', ariaLabel: 'Ver solo una categoría' },
+    chip('Todos', null), ...presentes.map((c) => chip(`${c.icono} ${c.nombre}`, c.id)));
+}
+
 function alternarDia(v, dia) {
   v.ocultos = v.ocultos.includes(dia) ? v.ocultos.filter((d) => d !== dia) : [...v.ocultos, dia];
   guardar();
@@ -396,17 +413,22 @@ function seccionDia(v, dia, lugares) {
   const llega = real ? llegadas(real) : [];
   const desplazar = ends.inicio && lugares.length ? 1 : 0;
   const ponerNota = (t) => { v.notasDia = { ...v.notasDia, [dia]: t }; };
+  const trayectos = lugares.map((l, i) => llega[i + desplazar]?.min
+    ?? (i ? minutosTramo(lugares[i - 1], l) : ends.inicio ? minutosTramo(ends.inicio, l) : 0));
+  const plan = dia && lugares.length ? agenda(v, dia, lugares, trayectos) : null;
   const resumen = [
     dia && fechaDelDia(v, dia),
     real ? textoRuta(real)
       : km ? `${km.toLocaleString('es', { maximumFractionDigits: 1 })} km en línea recta` : plural(lugares.length, 'lugar', 'lugares'),
     dia && textoTiempo(v, dia),
     dia && !minutosUtiles(v)[dia - 1] ? 'sin tiempo libre por el vuelo' : '',
+    plan ? `acabas sobre las ${hora(plan.horas.at(-1).sale)}` : '',
   ].filter(Boolean).join(' · ');
   const seccion = el('section', { className: 'dia', color: color(dia) },
     el('div', { className: 'cabecera' },
       el('h2', { textContent: dia ? `Día ${dia}` : 'Sin día' }),
       dia && !v.notasDia[dia] ? boton('Nota', () => editarNota(`Nota del día ${dia}`, '', ponerNota), 'texto') : null,
+      dia && lugares.length ? boton('🍽️ Comer cerca', () => abrirComer(v, dia), 'texto') : null,
       botonIcono('ojo', `Ocultar ${dia ? `el día ${dia}` : 'los lugares sin día'}`, () => alternarDia(v, dia))),
     rutas.length ? el('div', { className: 'fila rutas' },
       ...rutas.map(({ href, modo }, i) => enlace(`${MODOS[modo]} ${rutas.length > 1 ? `Ruta ${i + 1}` : 'Ruta'}`, href, 'boton ruta'))) : null,
@@ -415,7 +437,10 @@ function seccionDia(v, dia, lugares) {
     dia ? nota(v.notasDia[dia], `Nota del día ${dia}`, ponerNota) : null,
     el('ol', { className: 'paradas' },
       ends.inicio && lugares.length ? extremo(v, ends.inicio) : null,
-      ...lugares.map((l, i) => parada(v, l, i, lugares, llega[i + desplazar])),
+      ...lugares.flatMap((l, i) => [
+        filtro && l.tipo !== filtro ? null : parada(v, l, i, lugares, llega[i + desplazar], plan?.horas[i]),
+        ...(plan?.comidas.filter((c) => c.despues === i).map((c) => avisoComida(v, dia, c, l)) ?? []),
+      ]),
       ends.fin && lugares.length ? extremo(v, ends.fin, llega.at(-1)) : null));
   seccion.dataset.dia = dia;
   return seccion;
@@ -520,7 +545,48 @@ function editarConsejo(v, c = null, inicial = {}) {
   $('dlg-consejo').showModal();
 }
 
-function parada(v, l, i, hermanos, llegada = null) {
+const opcionesCategoria = () => CATEGORIAS.map((c) => ({ texto: `${c.icono} ${c.nombre}`, valor: c.id }));
+function botonCategoria(l) {
+  const c = categoria(l.tipo);
+  return el('button', {
+    type: 'button', className: 'categoria', textContent: c.icono, title: c.nombre, ariaLabel: `Categoría de ${l.nombre}: ${c.nombre}`,
+    onclick: async () => {
+      const tipo = await preguntar(`¿Qué es ${l.nombre}?`, opcionesCategoria());
+      if (tipo) {
+        l.tipo = tipo;
+        guardar();
+      }
+    },
+  });
+}
+
+const ESTANCIAS = [15, 30, 45, 60, 90, 120, 180, 240];
+function botonHoras(l, horas) {
+  return el('button', {
+    type: 'button', className: 'horas', title: 'Cambiar el tiempo que estarás aquí',
+    textContent: `🕐 ${hora(horas.llega)}–${hora(horas.sale)} · ${duracion(estanciaDe(l))}`,
+    onclick: async () => {
+      const m = await preguntar(`¿Cuánto tiempo en ${l.nombre}?`, ESTANCIAS.map((n) => ({
+        texto: `${duracion(n)}${n === estanciaDe(l) ? ' ✓' : ''}`, valor: n,
+      })));
+      if (m) {
+        l.estancia = m;
+        guardar();
+      }
+    },
+  });
+}
+
+function avisoComida(v, dia, comida, l) {
+  const texto = comida.tipo === 'comida' ? 'hora de comer' : 'hora de cenar';
+  return el('li', { className: 'aviso-comida' },
+    el('b', { textContent: '🍽️', ariaHidden: 'true' }),
+    el('div', { className: 'fila' },
+      el('span', { textContent: `Sobre las ${hora(comida.hora)}, ${texto} cerca de ${l.nombre}` }),
+      boton('Buscar sitio', () => abrirComer(v, dia, 'comida'), 'texto')));
+}
+
+function parada(v, l, i, hermanos, llegada = null, horas = null) {
   const mover = el('select', {
     ariaLabel: `Día de ${l.nombre}`,
     onchange: (e) => {
@@ -548,7 +614,9 @@ function parada(v, l, i, hermanos, llegada = null) {
     asa,
     lineaTramo(llegada),
     el('div', { className: 'ficha' },
-      el('div', {}, enlace(l.nombre, enlaceLugar(appMapas(), l, v.destino), 'titulo'), el('small', { textContent: l.direccion }), lineaHorario(v, l)),
+      el('div', {},
+        el('div', { className: 'nombre-lugar' }, botonCategoria(l), enlace(l.nombre, enlaceLugar(appMapas(), l, v.destino), 'titulo')),
+        el('small', { textContent: l.direccion }), lineaHorario(v, l), horas ? botonHoras(l, horas) : null),
       l.foto ? miniatura(l, v.destino) : null),
     nota(l.nota, `Nota de ${l.nombre}`, ponerNota),
     el('div', { className: 'fila' },
@@ -646,6 +714,7 @@ async function pintarMapa(div, v) {
   este.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
   const porDia = Array.from({ length: v.dias + 1 }, (_, dia) => (v.ocultos.includes(dia) ? [] : v.lugares.filter((l) => l.dia === dia)));
   porDia.forEach((lugares, dia) => lugares.forEach((l, i) => {
+    if (filtro && l.tipo !== filtro) return;
     const pin = el('div', { className: 'pin', color: color(dia), textContent: i + 1, title: l.nombre });
     new maplibregl.Marker({ element: pin }).setLngLat([l.lon, l.lat])
       .setPopup(new maplibregl.Popup({ offset: 16, closeButton: false }).setDOMContent(el('strong', { textContent: l.nombre })))
@@ -677,16 +746,107 @@ async function pintarMapa(div, v) {
   }));
 }
 
-function organizarViaje(v) {
-  if (v.lugares.some((l) => l.dia) && !confirm('Se reordenarán todos los lugares y días. ¿Seguir?')) return;
-  v.lugares = organizar(v);
+const COCINAS = {
+  pizza: 'pizza', italian: 'italiana', spanish: 'española', tapas: 'tapas', burger: 'hamburguesas', sushi: 'sushi', japanese: 'japonesa',
+  chinese: 'china', mexican: 'mexicana', indian: 'india', kebab: 'kebab', seafood: 'marisco', vegetarian: 'vegetariana', vegan: 'vegana',
+  coffee_shop: 'cafetería', ice_cream: 'helados', regional: 'regional', french: 'francesa', greek: 'griega', thai: 'tailandesa', portuguese: 'portuguesa',
+};
+const TIPOS_COMER = ['comida', 'cafe', 'copas', 'helado'];
+let consultaComer = 0;
+
+/** Mete un sitio en el día, entre las paradas donde menos se desvía la ruta. */
+function meterEnDia(v, dia, nuevo) {
+  const paradas = v.lugares.filter((l) => l.dia === dia);
+  const { inicio } = extremosDelDia(v, dia);
+  const k = Math.min(paradas.length, Math.max(0, mejorHueco(puntosDelDia(v, dia, paradas), nuevo) - (inicio ? 1 : 0)));
+  const sitio = paradas[k] ? v.lugares.indexOf(paradas[k]) : paradas.length ? v.lugares.indexOf(paradas.at(-1)) + 1 : v.lugares.length;
+  v.lugares.splice(sitio, 0, { id: crypto.randomUUID(), enlace: '', nota: '', ...nuevo, dia });
+}
+
+/** Restaurantes, cafés, bares y heladerías cerca de las paradas de un día, para añadirlos a su ruta. */
+async function abrirComer(v, dia, inicial = null) {
+  const esta = ++consultaComer;
+  const paradas = v.lugares.filter((l) => l.dia === dia);
+  const semana = diaSemana(v, dia);
+  const lista = $('comer-lista');
+  const estado = $('estado-comer');
+  const aceptar = $('anadir-comer');
+  let tipo = 'comida';
+  let sitios = [];
+  const marcados = new Set();
+  $('comer-titulo').textContent = `Comer cerca · Día ${dia}`;
+  aceptar.disabled = true;
+  lista.replaceChildren();
+  $('comer-tipos').replaceChildren();
+  estado.textContent = 'Buscando sitios cerca de las paradas…';
+  $('dlg-comer').showModal();
+
+  const horas = (s) => (s.horario && semana !== null ? horarioDelDia(s.horario, semana) : null);
+  const pintarLista = () => {
+    $('comer-tipos').replaceChildren(...TIPOS_COMER.map((t) => {
+      const n = sitios.filter((s) => s.tipo === t).length;
+      return el('button', {
+        type: 'button', className: 'chip', ariaPressed: String(tipo === t), disabled: !n,
+        textContent: `${categoria(t).icono} ${categoria(t).nombre} (${n})`, onclick: () => { tipo = t; pintarLista(); },
+      });
+    }));
+    // Primero lo que abre ese día y está más cerca; lo que cierra, al final.
+    const visibles = sitios.filter((s) => s.tipo === tipo)
+      .sort((a, b) => (horas(a)?.length === 0) - (horas(b)?.length === 0) || a.km - b.km).slice(0, 40);
+    estado.textContent = visibles.length ? '' : 'No hay sitios de este tipo cerca.';
+    lista.replaceChildren(...visibles.map((s) => {
+      const h = horas(s);
+      const detalle = [
+        s.cocina.split(';').map((c) => COCINAS[c.trim()] ?? c.trim().replace(/_/g, ' ')).filter(Boolean).join(', '),
+        `a ${kmTexto(s.km)} de ${s.cerca}`,
+        h === null ? '' : h.length ? `abre ${h.map((x) => x.replace('-', '–')).join(' y ')}` : 'cerrado ese día',
+      ].filter(Boolean).join(' · ');
+      return el('label', { className: 'hallazgo' },
+        el('input', {
+          type: 'checkbox', checked: marcados.has(s),
+          onchange: (e) => { if (e.target.checked) marcados.add(s); else marcados.delete(s); aceptar.disabled = !marcados.size; },
+        }),
+        el('span', {}, el('strong', { textContent: s.nombre }), el('small', { className: h?.length === 0 ? 'cerrado' : '', textContent: ` ${detalle}` })));
+    }));
+  };
+
+  try {
+    const encontrados = await buscarComida(puntosDelDia(v, dia, paradas));
+    if (esta !== consultaComer) return;
+    sitios = encontrados
+      .filter((s) => !v.lugares.some((l) => distanciaKm(l, s) < 0.05 && parecido(l.nombre, s.nombre) >= 0.5))
+      .map((s) => {
+        const cerca = paradas.reduce((a, b) => (distanciaKm(b, s) < distanciaKm(a, s) ? b : a));
+        return { ...s, km: distanciaKm(cerca, s), cerca: cerca.nombre };
+      });
+  } catch {
+    if (esta === consultaComer) estado.textContent = 'No se pudo buscar. Revisa la conexión.';
+    return;
+  }
+  tipo = [inicial, ...TIPOS_COMER].find((t) => t && sitios.some((s) => s.tipo === t)) ?? 'comida';
+  pintarLista();
+  $('form-comer').onsubmit = () => {
+    for (const { km, cerca, cocina, ...s } of marcados) meterEnDia(v, dia, s);
+    guardar();
+  };
+}
+
+async function organizarViaje(v) {
+  const como = await preguntar('¿Cómo lo organizo?', [
+    { texto: '🗺️ Todo el viaje', detalle: 'La ruta más corta: reparte los lugares entre los días y puede cambiarlos de día', valor: 'todo' },
+    v.lugares.some((l) => l.dia) ? { texto: '📅 Cada día por separado', detalle: 'Solo ordena las paradas de cada día; ninguna cambia de día', valor: 'dias' } : null,
+  ]);
+  if (!como) return;
+  v.lugares = como === 'todo' ? organizar(v) : ordenarDias(v);
   guardar();
 }
 
 // Mientras no haya días asignados, la ruta se calcula sola; después se respeta lo que haya.
 function anadir(v, nuevos) {
   const sinOrganizar = v.lugares.every((l) => !l.dia);
-  v.lugares.push(...nuevos.map((l) => ({ enlace: '', nota: '', ...l, id: crypto.randomUUID(), dia: 0 })));
+  v.lugares.push(...nuevos.map((l) => ({
+    enlace: '', nota: '', ...l, tipo: l.tipo || adivinarCategoria(`${l.nombre} ${l.direccion ?? ''}`), id: crypto.randomUUID(), dia: 0,
+  })));
   if (sinOrganizar) v.lugares = organizar(v);
   guardar();
 }
@@ -1140,9 +1300,13 @@ function mostrarHallazgo(nombre, { opciones, seguro }, fallo) {
   const marca = el('input', { type: 'checkbox', checked: seguro, disabled: !opciones.length, onchange: actualizarAnadir, ariaLabel: `Añadir ${nombre}` });
   const elegir = el('select', { ariaLabel: `Dirección de ${nombre}` },
     ...opciones.map((o, i) => el('option', { value: i, textContent: [o.nombre, o.direccion].filter(Boolean).join(' · ') })));
+  const propuesta = adivinarCategoria(`${nombre} ${opciones[0]?.direccion ?? ''}`);
+  const tipo = el('select', { ariaLabel: `Categoría de ${nombre}` },
+    ...CATEGORIAS.map((c) => el('option', { value: c.id, textContent: `${c.icono} ${c.nombre}`, selected: c.id === propuesta })));
   $('resultados').append(el('div', { className: 'hallazgo' }, marca,
-    el('div', {}, el('strong', { textContent: nombre }), fallo || !seguro ? el('p', { className: 'tenue', textContent: fallo || 'Dudoso: elige la opción correcta y márcala.' }) : null, fallo ? null : elegir)));
-  if (opciones.length) hallazgos.push({ nombre, marca, elegido: () => opciones[elegir.value] });
+    el('div', {}, el('strong', { textContent: nombre }), fallo || !seguro ? el('p', { className: 'tenue', textContent: fallo || 'Dudoso: elige la opción correcta y márcala.' }) : null,
+      fallo ? null : elegir, fallo ? null : tipo)));
+  if (opciones.length) hallazgos.push({ nombre, marca, elegido: () => opciones[elegir.value], tipo: () => tipo.value });
   actualizarAnadir();
 }
 
@@ -1162,7 +1326,7 @@ $('form-lugares').onsubmit = (e) => {
   const elegidos = hallazgos.filter((h) => h.marca.checked);
   if (!elegidos.length) { e.preventDefault(); return; }
   const enlace = enlaceSeguro($('form-lugares').elements.enlace.value.trim());
-  anadir(v, elegidos.map((h) => ({ ...h.elegido(), nombre: h.nombre, enlace })));
+  anadir(v, elegidos.map((h) => ({ ...h.elegido(), nombre: h.nombre, enlace, tipo: h.tipo() })));
 };
 document.querySelectorAll('[data-cerrar]').forEach((b) => { b.onclick = () => b.closest('dialog').close(); });
 
@@ -1295,8 +1459,22 @@ async function recibirViaje() {
   }
 }
 
-// Texto que llega desde el botón de compartir de otra app (Instagram, TikTok…), con la app instalada en Android.
-function recibirPublicacion() {
+/** Lista de opciones en una hoja; devuelve el valor elegido o null si se cancela. */
+function preguntar(titulo, opciones) {
+  return new Promise((resolver) => {
+    const dlg = $('dlg-elegir');
+    let valor = null;
+    $('elegir-titulo').textContent = titulo;
+    $('elegir-opciones').replaceChildren(...opciones.filter(Boolean).map((o) => el('button', {
+      type: 'button', className: 'ciudad', onclick: () => { valor = o.valor; dlg.close(); },
+    }, el('span', { textContent: o.texto }), o.detalle ? el('small', { textContent: o.detalle }) : null)));
+    dlg.onclose = () => resolver(valor);
+    dlg.showModal();
+  });
+}
+
+// Lo que llega desde el botón de compartir de otra app (Instagram, TikTok…), con la app instalada en Android.
+async function recibirPublicacion() {
   const q = new URLSearchParams(location.search);
   if (!q.has('compartir')) return;
   history.replaceState(null, '', location.pathname);
@@ -1304,25 +1482,37 @@ function recibirPublicacion() {
   const enlaceVisto = enlaceSeguro(q.get('enlace') ?? '') || enlaceSeguro(/https?:\/\/\S+/.exec(todo)?.[0] ?? '');
   const texto = todo.replace(/https?:\/\/\S+/g, '').trim();
   if (!viajes.length) {
-    avisar('Crea primero un viaje para guardar los lugares.');
+    avisar('Crea primero un viaje para guardar lo que compartes.');
     return;
   }
-  const abrir = (v) => {
-    ir(v.id);
+  const v = viajes.length === 1 ? viajes[0] : await preguntar('¿A qué viaje lo añado?',
+    viajes.map((x) => ({ texto: `${bandera(x.pais)} ${x.nombre}`.trim(), detalle: x.destino, valor: x })));
+  if (!v) return;
+  ir(v.id);
+  const que = await preguntar('¿Qué hago con esto?', [
+    { texto: '📍 Buscar lugares', detalle: 'Saca los sitios del texto y los añade al viaje', valor: 'lugares' },
+    { texto: '💡 Guardar como consejo', detalle: 'Dónde comer, qué evitar, cómo moverse…', valor: 'consejo' },
+    v.lugares.length ? { texto: '📝 Nota de un sitio', detalle: 'Lo guarda en un lugar que ya está en el viaje', valor: 'nota' } : null,
+  ]);
+  if (que === 'consejo') editarConsejo(v, null, { texto, enlace: enlaceVisto });
+  if (que === 'lugares') {
     abrirLugares();
     const f = $('form-lugares');
     f.elements.enlace.value = enlaceVisto;
     f.elements.texto.value = texto;
     if (texto) buscar();
-  };
-  if (viajes.length === 1) {
-    abrir(viajes[0]);
-    return;
   }
-  $('elegir-viaje').replaceChildren(...viajes.map((v) => el('button', {
-    type: 'button', className: 'ciudad', onclick: () => { $('dlg-elegir').close(); abrir(v); },
-  }, el('span', { textContent: `${bandera(v.pais)} ${v.nombre}`.trim() }), el('small', { textContent: v.destino }))));
-  $('dlg-elegir').showModal();
+  if (que === 'nota') {
+    const l = await preguntar('¿En qué sitio?', v.lugares.map((x) => ({
+      texto: `${categoria(x.tipo).icono} ${x.nombre}`, detalle: x.dia ? `Día ${x.dia}` : 'Sin día', valor: x,
+    })));
+    if (!l) return;
+    const nueva = [l.nota, texto, enlaceVisto].filter(Boolean).join('\n\n');
+    editarNota(`Nota de ${l.nombre}`, nueva, (t) => {
+      l.nota = t;
+      if (!l.enlace && enlaceVisto) l.enlace = enlaceVisto;
+    });
+  }
 }
 
 async function exportar() {

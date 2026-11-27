@@ -126,6 +126,15 @@ function repartir(lugares, dias, pesos) {
   });
 }
 
+/** Ordena las paradas dentro de cada día sin cambiar ninguna de día; las que no tienen día quedan igual. */
+export function ordenarDias(v) {
+  const dias = Array.from({ length: v.dias }, (_, i) => i + 1).flatMap((d) => {
+    const { inicio, fin } = extremosDelDia(v, d);
+    return ordenarRuta(v.lugares.filter((l) => l.dia === d), inicio, fin);
+  });
+  return [...dias, ...v.lugares.filter((l) => !l.dia)];
+}
+
 /** Asigna día y orden a los lugares según cercanía, tiempo útil de cada día y hoteles. */
 export function organizar(v) {
   const dias = Array.from({ length: v.dias }, (_, i) => i + 1);
@@ -364,6 +373,94 @@ export function coincide(busqueda, texto) {
   });
 }
 
+export const CATEGORIAS = [
+  { id: 'monumento', nombre: 'Monumentos', icono: '🏛️' },
+  { id: 'museo', nombre: 'Museos', icono: '🖼️' },
+  { id: 'comida', nombre: 'Comer', icono: '🍽️' },
+  { id: 'cafe', nombre: 'Café y dulces', icono: '☕' },
+  { id: 'copas', nombre: 'Copas', icono: '🍸' },
+  { id: 'helado', nombre: 'Helados', icono: '🍦' },
+  { id: 'mirador', nombre: 'Miradores', icono: '🌄' },
+  { id: 'naturaleza', nombre: 'Parques y playas', icono: '🌳' },
+  { id: 'compras', nombre: 'Compras', icono: '🛍️' },
+  { id: 'otro', nombre: 'Otros', icono: '📍' },
+];
+
+// Palabras del nombre o la descripción que delatan qué es un sitio, en los idiomas más habituales. El orden importa.
+const PISTAS = [
+  ['museo', /\b(museo|museu|museum|musee|galeria|gallery|galleria|pinacoteca)/],
+  ['mirador', /\b(mirador|miradouro|viewpoint|belvedere|vistas?|panoramic\w*)\b/],
+  ['helado', /\b(heladeria|gelat\w*|ice cream|glacier)\b/],
+  ['cafe', /\b(cafe|caffe|coffee|cafeteria|pasteleria|pastelaria|bakery|panaderia|brunch|churreria|pasticceria)\b/],
+  ['copas', /\b(bar|pub|cocktails?|coctel\w*|rooftop|taberna|vinoteca|wine)\b/],
+  ['comida', /\b(restaurante?|ristorante|trattoria|osteria|pizzeria|tasca|marisqueria|asador|sushi|burger|tapas|comida|food|bistro|brasserie|taqueria|mercado|market|mercato)\b/],
+  ['naturaleza', /\b(parque|park|parco|jardin|jardines|garden|giardino|jardim|playa|beach|spiaggia|praia|lago|lake|bosque|monte)\b/],
+  ['compras', /\b(tienda|shop|store|outlet|boutique|mall|centro comercial)\b/],
+  ['monumento', /\b(catedral|cathedral|basilica|iglesia|church|chiesa|igreja|templo|temple|palacio|palace|palazzo|palacio|castillo|castle|castel|castello|castelo|chateau|torre|tower|puente|bridge|ponte|plaza|piazza|praca|square|coliseo|colosseo|fontana|fuente|arco|monumento|monument|ruinas|foro|panteon|pantheon|alhambra|mezquita|mosque|muralla)\b/],
+];
+
+/** Categoría probable de un sitio por su nombre y descripción; 'otro' si no hay pistas. */
+export const adivinarCategoria = (texto) => PISTAS.find(([, re]) => re.test(sinAcentos(texto)))?.[0] ?? 'otro';
+
+/** Posición de `puntos` delante de la que meter `x` para desviarse lo menos posible (puede ser el final). */
+export function mejorHueco(puntos, x) {
+  if (puntos.length < 2) return puntos.length;
+  let mejor = puntos.length;
+  let coste = distanciaKm(puntos.at(-1), x);
+  for (let i = 1; i < puntos.length; i++) {
+    const c = distanciaKm(puntos[i - 1], x) + distanciaKm(x, puntos[i]) - distanciaKm(puntos[i - 1], puntos[i]);
+    if (c < coste) {
+      coste = c;
+      mejor = i;
+    }
+  }
+  return mejor;
+}
+
+// Minutos que se suele pasar en cada tipo de sitio, mientras no se ponga otro.
+export const ESTANCIA = { monumento: 60, museo: 120, comida: 75, cafe: 30, copas: 60, helado: 15, mirador: 20, naturaleza: 60, compras: 45, otro: 45 };
+export const estanciaDe = (l) => l.estancia || ESTANCIA[l.tipo] || 45;
+
+/** Minutos de un tramo sin ruta real: andando a 4,5 km/h o en coche a 30 km/h, con un 30 % de rodeo. */
+export function minutosTramo(a, b) {
+  const km = distanciaKm(a, b);
+  return km < A_PIE_KM ? (km * 1.3 / 4.5) * 60 : (km * 1.3 / 30) * 60 + 5;
+}
+
+export const hora = (m) => `${dosCifras(Math.floor(m / 60) % 24)}:${dosCifras(Math.round(m % 60))}`;
+
+const FRANJAS = [['comida', 13 * 60 + 30, 15 * 60 + 30, 60], ['cena', 20 * 60 + 30, 22 * 60, 75]];
+
+/**
+ * Hora aproximada de llegada y salida de cada parada, y dónde encaja comer y cenar si ninguna parada es para eso.
+ * `trayectos[i]` son los minutos para llegar a la parada i desde el punto anterior. El día empieza a las 9,
+ * o hora y media después de aterrizar, y cada comida sugerida retrasa lo que viene detrás.
+ */
+export function agenda(v, dia, paradas, trayectos) {
+  const aterriza = dia === 1 ? minutos(v.ida?.llegada) : null;
+  const calcular = (pausas) => {
+    let reloj = aterriza === null ? DE : aterriza + 90;
+    return paradas.map((l, i) => {
+      const llega = reloj + (trayectos[i] ?? 0);
+      reloj = llega + estanciaDe(l) + (pausas.get(i) ?? 0);
+      return { llega, sale: llega + estanciaDe(l) };
+    });
+  };
+  let horas = calcular(new Map());
+  const comidas = [];
+  for (const [tipo, desde, hasta, dura] of FRANJAS) {
+    if (!paradas.length) break;
+    const yaCome = paradas.some((l, i) => l.tipo === 'comida' && horas[i].sale > desde && horas[i].llega < hasta);
+    if (yaCome) continue;
+    // Tras la primera parada que acaba ya dentro de la franja; si el día termina antes, al final.
+    const primera = horas.findIndex((h) => h.sale >= desde);
+    const i = primera === -1 ? paradas.length - 1 : primera;
+    comidas.push({ tipo, despues: i, hora: Math.max(desde, horas[i].sale), dura });
+    horas = calcular(new Map(comidas.map((c) => [c.despues, c.dura])));
+  }
+  return { horas, comidas };
+}
+
 export const TIPOS_CONSEJO = [
   { id: 'comida', nombre: 'Comida', icono: '🍽️' },
   { id: 'evitar', nombre: 'Dónde no comprar', icono: '⚠️' },
@@ -425,6 +522,9 @@ export function validarViajes(datos) {
           nota: texto(l.nota, NOTA),
           // Igual que la foto: sin definir es que aún no se ha buscado.
           horario: typeof l.horario === 'string' ? l.horario.slice(0, 300) : undefined,
+          // Los guardados antes de haber categorías la reciben por su nombre.
+          estancia: Number.isInteger(l.estancia) && l.estancia >= 5 && l.estancia <= 600 ? l.estancia : 0,
+          tipo: CATEGORIAS.some((c) => c.id === l.tipo) ? l.tipo : adivinarCategoria(`${texto(l.nombre)} ${texto(l.direccion, 300)}`),
           dia: Number.isInteger(l.dia) && l.dia >= 1 && l.dia <= dias ? l.dia : 0,
         };
       }),

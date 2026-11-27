@@ -105,10 +105,21 @@
   </form>
 </dialog>
 
+<dialog id="dlg-comer" aria-labelledby="comer-titulo">
+  <form method="dialog" id="form-comer">
+    <h2 id="comer-titulo" tabindex="-1" autofocus>Comer cerca</h2>
+    <div class="filtros" id="comer-tipos" role="group" aria-label="Qué buscas"></div>
+    <p id="estado-comer" class="tenue" role="status"></p>
+    <div id="comer-lista"></div>
+    <p><small>Sitios de OpenStreetMap. Se añaden a la ruta donde menos te desvías.</small></p>
+    <div class="fila pie"><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte" id="anadir-comer" disabled>Añadir a la ruta</button></div>
+  </form>
+</dialog>
+
 <dialog id="dlg-elegir" aria-labelledby="elegir-titulo">
   <form method="dialog">
-    <h2 id="elegir-titulo">¿A qué viaje lo añado?</h2>
-    <div id="elegir-viaje"></div>
+    <h2 id="elegir-titulo" tabindex="-1" autofocus>¿A qué viaje lo añado?</h2>
+    <div id="elegir-opciones"></div>
     <div class="fila"><button type="button" class="suave" data-cerrar>Cancelar</button></div>
   </form>
 </dialog>

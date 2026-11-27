@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje } from './logica.js';
+import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje, adivinarCategoria, mejorHueco, ordenarDias, agenda, hora, minutosTramo } from './logica.js';
 
 assert.deepEqual(
   extraerLugares('Lo mejor de Roma 😍\n📍 Trattoria Da Enzo - la mejor pasta\n📍Panteón 📍 Coliseo (reserva!)\n#roma #viajes'),
@@ -159,3 +159,38 @@ assert.equal(mia.lugares[0].foto, 'https://upload.wikimedia.org/c.jpg');
 assert.equal(mia.lugares[0].dia, 2);
 assert.equal(mia.lugares[1].foto, undefined);
 assert.equal(mia.consejos[0].texto, 'Supplì');
+
+// Categorías por el nombre, también sin acentos y en otros idiomas.
+assert.equal(adivinarCategoria('Museo del Prado'), 'museo');
+assert.equal(adivinarCategoria('Trattoria Da Enzo al 29'), 'comida');
+assert.equal(adivinarCategoria('Café de Flore'), 'cafe');
+assert.equal(adivinarCategoria('Gelateria del Teatro'), 'helado');
+assert.equal(adivinarCategoria('Miradouro da Graça'), 'mirador');
+assert.equal(adivinarCategoria('Panteón'), 'monumento');
+assert.equal(adivinarCategoria('Castel Sant'Angelo'), 'monumento');
+assert.equal(adivinarCategoria('Barcelona'), 'otro');
+assert.equal(validarViajes({ viajes: [{ lugares: [{ nombre: 'Basílica de San Pedro', lat: 41.9, lon: 12.45 }] }] })[0].lugares[0].tipo, 'monumento');
+
+// Un sitio nuevo va donde menos se desvía la ruta.
+const linea = [p('a', 0, 0), p('b', 0, 0.01), p('c', 0, 0.02)];
+assert.equal(mejorHueco(linea, p('x', 0, 0.015)), 2);
+assert.equal(mejorHueco(linea, p('x', 0, 0.03)), 3);
+assert.equal(mejorHueco([p('a', 0, 0)], p('x', 0, 1)), 1);
+
+// Ordenar por días no cambia a nadie de día.
+const desordenado = viaje([p('a', 0, 0.02), p('b', 0, 0), p('c', 0, 0.01), p('z', 1, 1)].map((l, i) => ({ ...l, dia: i < 3 ? 1 : 0 })), 2);
+const porDias = ordenarDias(desordenado);
+assert.deepEqual(porDias.map((l) => `${l.id}${l.dia}`).slice(-1), ['z0']);
+assert.ok(['b1,c1,a1', 'a1,c1,b1'].includes(porDias.slice(0, 3).map((l) => `${l.id}${l.dia}`).join()));
+
+// Horario del día: desde las 9, con estancias y trayectos; propone comer y cenar si no hay dónde.
+const paradasDia = [{ tipo: 'museo' }, { tipo: 'monumento' }, { tipo: 'mirador', estancia: 30 }];
+const plan = agenda({ dias: 1 }, 1, paradasDia, [0, 30, 15]);
+assert.deepEqual(plan.horas.map((h) => `${hora(h.llega)}-${hora(h.sale)}`), ['09:00-11:00', '11:30-12:30', '12:45-13:15']);
+assert.deepEqual(plan.comidas.map((c) => `${c.tipo}@${hora(c.hora)}#${c.despues}`), ['comida@13:30#2', 'cena@20:30#2']);
+const conRestaurante = agenda({ dias: 1 }, 1, [{ tipo: 'museo', estancia: 240 }, { tipo: 'comida' }], [0, 10]);
+assert.deepEqual(conRestaurante.comidas.map((c) => c.tipo), ['cena']);
+// Al aterrizar a las 11:00 el día empieza a las 12:30, y la comida retrasa lo que viene detrás.
+const llegada = agenda({ dias: 2, ida: { llegada: '11:00' } }, 1, [{ tipo: 'monumento' }, { tipo: 'monumento' }], [0, 0]);
+assert.deepEqual(llegada.horas.map((h) => hora(h.llega)), ['12:30', '14:30']);
+assert.ok(minutosTramo(p('', 0, 0), p('', 0, 0.01)) > 15 && minutosTramo(p('', 0, 0), p('', 0, 0.01)) < 25);
