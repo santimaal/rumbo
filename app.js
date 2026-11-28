@@ -1820,7 +1820,7 @@ function abrirNovedades(versiones) {
   $('lista-novedades').replaceChildren(...versiones.flatMap(({ version, cosas }) => [
     versiones.length > 1 ? el('h3', { textContent: `Versión ${version}` }) : null,
     el('ul', {}, ...cosas.map((c) => el('li', { textContent: c }))),
-  ]));
+  ].filter(Boolean)));
   $('dlg-novedades').showModal();
 }
 
