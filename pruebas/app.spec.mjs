@@ -880,14 +880,14 @@ test('los lugares que el asistente no pudo situar los sitúa la app al abrir el 
 test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) => {
   await sinRed(page);
   await sembrar(page, [viaje()], { novedadesVistas: false });
-  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '17'); sessionStorage.setItem('vista', '1'); } });
+  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '18'); sessionStorage.setItem('vista', '1'); } });
   await page.goto('/');
   const ventana = page.getByRole('dialog', { name: /Novedades de Rumbo/ });
   await expect(ventana).toBeVisible();
   // Con una sola versión no hay título por versión, ni restos como «null».
-  await expect(ventana).toContainText('pellizcar');
+  await expect(ventana).toContainText('dentro de su etiqueta');
   await expect(ventana).not.toContainText('null');
-  await expect(ventana).not.toContainText('descarga el mapa');
+  await expect(ventana).not.toContainText('pellizcar');
   await ventana.getByRole('button', { name: 'Entendido' }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
@@ -895,7 +895,7 @@ test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) 
   // Desde Ajustes se pueden volver a ver.
   await page.getByRole('button', { name: 'Ajustes' }).click();
   await page.getByRole('button', { name: 'Ver novedades' }).click();
-  await expect(ventana).toContainText('«Ver más»');
+  await expect(ventana).toContainText('descarga el mapa');
 });
 
 test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {

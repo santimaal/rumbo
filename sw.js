@@ -1,4 +1,4 @@
-const CACHE = 'rumbo-18';
+const CACHE = 'rumbo-19';
 const MAPLIBRE = 'https://unpkg.com/maplibre-gl@5.24.1/dist/';
 const QR = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
 const ARCHIVOS = ['./', 'estilo.css', 'app.js', 'logica.js', 'fuentes.js', 'novedades.js', 'manifest.webmanifest', 'icono-180.png', `${MAPLIBRE}maplibre-gl.js`, `${MAPLIBRE}maplibre-gl.css`];

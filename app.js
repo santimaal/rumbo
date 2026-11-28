@@ -1022,7 +1022,7 @@ function seccionTareas(v) {
 
 function seccionProbar(v) {
   return el('div', { className: 'probar' },
-    el('div', { className: 'filtros' }, ...v.probar.map((p) => el('span', { className: 'plato' },
+    el('div', { className: 'filtros' }, ...v.probar.map((p) => el('span', { className: `plato${p.probado ? ' probado' : ''}` },
       el('button', {
         type: 'button', className: 'chip', ariaPressed: String(p.probado), textContent: `${p.probado ? '✓ ' : ''}${p.nombre}`,
         title: p.probado ? 'Marcar como no probado' : 'Marcar como probado', onclick: () => { p.probado = !p.probado; guardar(); },

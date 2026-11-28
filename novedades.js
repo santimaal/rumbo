@@ -2,6 +2,10 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 19,
+    cosas: ['😋 En «Para probar», la × para quitar un plato va dentro de su etiqueta.'],
+  },
+  {
     version: 18,
     cosas: ['🤏 La app ya no se amplía al pellizcar con dos dedos ni con doble toque; el mapa sí se sigue ampliando.'],
   },
