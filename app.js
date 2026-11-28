@@ -224,6 +224,7 @@ const ICONOS = {
   borrar: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/><path d="M10 11v6M14 11v6"/>',
   avion: '<path d="M2 16.5 22 9c-.5-1.8-2.3-2.6-4-2L14 8.5 7 4 5 5l4.5 5-4 1.5L3 10l-1.5 1L5 14z"/><path d="M3 21h18"/>',
   ojo: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  solo: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8" fill="currentColor"/>',
   ojoTachado: '<path d="M10.7 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.2M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a10 10 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m2 2 20 20"/>',
   ajustes: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
 };
@@ -429,6 +430,7 @@ function pintarViaje(v) {
       ].filter(Boolean).join(' · ') || 'vacío' }),
       el('span', { ariaHidden: 'true', textContent: '›' })),
     botonCambio(v),
+    avisoSolo(v),
     filtrosCategoria(v),
     divMapa,
     v.lugares.length ? null : el('p', { textContent: 'Aún no hay lugares. Mira las ideas o pega el texto de una publicación.' }),
@@ -708,6 +710,27 @@ function alternarDia(v, dia) {
   guardar();
 }
 
+/** Deja a la vista un solo día (y en el mapa solo su ruta); los demás quedan ocultos. */
+function soloDia(v, dia) {
+  v.ocultos = Array.from({ length: v.dias + 1 }, (_, d) => d).filter((d) => d !== dia);
+  guardar();
+  scrollTo(0, 0);
+}
+
+/** Si solo se ve un día, cuál; null si se ven varios o ninguno. */
+function diaSolo(v) {
+  const visibles = Array.from({ length: v.dias + 1 }, (_, d) => d).filter((d) => !v.ocultos.includes(d) && (d || v.lugares.some((l) => !l.dia)));
+  return v.dias > 1 && visibles.length === 1 ? visibles[0] : null;
+}
+
+function avisoSolo(v) {
+  const dia = diaSolo(v);
+  if (dia === null) return null;
+  return el('div', { className: 'aviso-solo' },
+    el('span', { textContent: `👁 Viendo solo ${dia ? `el día ${dia}` : 'los lugares sin día'}` }),
+    boton('Ver todos', () => { v.ocultos = []; guardar(); }, 'texto'));
+}
+
 /** Un día oculto solo deja su cabecera, y desaparece del mapa, para centrarse en los demás. */
 function diaOculto(v, dia, lugares) {
   const seccion = el('section', { className: 'dia oculto', color: color(dia) },
@@ -752,7 +775,9 @@ function seccionDia(v, dia, lugares) {
       el('h2', { textContent: dia ? `Día ${dia}` : 'Sin día' }),
       dia && !v.notasDia[dia] ? boton('Nota', () => editarNota(`Nota del día ${dia}`, '', ponerNota), 'texto') : null,
       dia && lugares.length ? boton('🍽️ Comer cerca', () => abrirComer(v, dia), 'texto') : null,
-      botonIcono('ojo', `Ocultar ${dia ? `el día ${dia}` : 'los lugares sin día'}`, () => alternarDia(v, dia))),
+      el('span', { className: 'iconos-dia' },
+        diaSolo(v) === null ? botonIcono('solo', `Ver solo ${dia ? `el día ${dia}` : 'los lugares sin día'}`, () => soloDia(v, dia)) : null,
+        botonIcono('ojo', `Ocultar ${dia ? `el día ${dia}` : 'los lugares sin día'}`, () => alternarDia(v, dia)))),
     rutas.length ? el('div', { className: 'fila rutas' },
       ...rutas.map(({ href, modo }, i) => enlace(`${MODOS[modo]} ${rutas.length > 1 ? `Ruta ${i + 1}` : 'Ruta'}`, href, 'boton ruta'))) : null,
     el('small', { textContent: resumen }),

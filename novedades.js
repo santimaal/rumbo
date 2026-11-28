@@ -4,6 +4,7 @@ export const NOVEDADES = [
   {
     version: 13,
     cosas: [
+      '🎯 Junto al ojo de cada día, un botón para ver solo ese día (y su ruta en el mapa). «Ver todos» lo deshace.',
       '✋ Al cambiar vuelos u hoteles, tu itinerario se queda como está salvo que pidas reordenarlo, y reorganizar se puede deshacer.',
       '🚕 El traslado al aeropuerto se calcula en coche, y si la última noche duermes en un hotel del aeropuerto cuenta solo unos minutos.',
       'Arreglado: horas como «16:60» y avisos de «hora de cenar» cuando ya había un restaurante para cenar.',

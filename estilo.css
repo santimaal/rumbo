@@ -92,7 +92,10 @@ button:disabled { opacity: .45; cursor: default; }
 /* Cada día es una línea de metro y cada lugar una parada. */
 .dia { margin: 28px 0 0; }
 .cabecera { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.cabecera .icono { margin-left: auto; color: var(--tenue); }
+.aviso-solo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding: 4px 4px 4px 14px; border-radius: 14px; background: var(--carta); font-weight: 600; }
+.cabecera .icono { color: var(--tenue); width: 36px; }
+.iconos-dia { display: flex; margin-left: auto; flex: none; }
+.oculto .cabecera .icono { margin-left: auto; }
 .oculto .cabecera h2 { opacity: .5; }
 .oculto .cabecera small { color: var(--tenue); }
 .cabecera h2 { background: var(--c); color: #fff; border-radius: 8px; padding: 4px 10px; line-height: 1.2; }

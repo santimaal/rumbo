@@ -902,3 +902,22 @@ test('cambiar vuelos u hoteles no reorganiza el itinerario salvo que se pida, y 
   await expect.poll(orden).toBe(original);
   await expect(page.locator('#aviso')).toContainText('Orden recuperado');
 });
+
+test('se puede ver solo un día y volver a verlos todos', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ dias: 3, lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 2), lugar('c', 'Vaticano', 41.9065, 12.4536, 3)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Ver solo el día 2' }).click();
+  await expect(page.locator('.aviso-solo')).toContainText('Viendo solo el día 2');
+  await expect(page.locator('.dia[data-dia="1"]')).toContainText('Oculto');
+  await expect(page.locator('.dia[data-dia="3"]')).toContainText('Oculto');
+  await expect(page.locator('.parada', { hasText: 'Panteón' })).toBeVisible();
+  // Mientras se ve uno solo, no hace falta el botón de «solo este».
+  await expect(page.getByRole('button', { name: /Ver solo el día/ })).toHaveCount(0);
+  expect((await guardados(page))[0].ocultos.sort()).toEqual([0, 1, 3]);
+  await page.getByRole('button', { name: 'Ver todos' }).click();
+  await expect(page.locator('.aviso-solo')).toHaveCount(0);
+  await expect(page.locator('.parada', { hasText: 'Coliseo' })).toBeVisible();
+  await expect(page.locator('.parada', { hasText: 'Vaticano' })).toBeVisible();
+});
