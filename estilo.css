@@ -230,7 +230,7 @@ textarea { resize: vertical; }
 .idea label:has(:focus-visible) :is(img, .sinfoto) { outline: 3px solid var(--marca); outline-offset: 2px; }
 .ver { position: absolute; top: 0; right: 0; width: 52px; height: 52px; display: grid; place-items: center; text-decoration: none; color: #12242d; font-weight: 700; z-index: 1; }
 .ver::before { content: ""; position: absolute; inset: 8px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px #0005; z-index: -1; }
-.pie { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom)); margin: 0 -18px calc(-18px - env(safe-area-inset-bottom)); padding: 12px 18px calc(18px + env(safe-area-inset-bottom)); background: var(--fondo); border-top: 1px solid var(--raya); }
+.pie { position: sticky; z-index: 2; bottom: calc(-18px - env(safe-area-inset-bottom)); margin: 0 -18px calc(-18px - env(safe-area-inset-bottom)); padding: 12px 18px calc(18px + env(safe-area-inset-bottom)); background: var(--fondo); border-top: 1px solid var(--raya); }
 .creditos { margin-top: 24px; font-size: 14px; color: var(--tenue); }
 .creditos summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
 .creditos a { display: block; padding: 6px 0; color: inherit; }

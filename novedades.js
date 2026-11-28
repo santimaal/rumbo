@@ -2,6 +2,10 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 21,
+    cosas: ['Arreglado: en «Qué ver», los botones ↗ de las fotos ya no se ponen encima de los botones de abajo.'],
+  },
+  {
     version: 20,
     cosas: [
       '🗑️ Los viajes borrados van a una papelera durante 7 días: desde la portada se pueden recuperar o borrar ya.',

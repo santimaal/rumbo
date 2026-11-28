@@ -425,6 +425,19 @@ test('si un viaje compartido ya no está en la nube, queda como copia propia', a
   await movil.close();
 });
 
+test('la barra de abajo de una hoja queda encima de lo que pasa por debajo', async ({ page }) => {
+  await sinRed(page);
+  await page.goto('/');
+  const capas = await page.evaluate(() => {
+    const pie = document.querySelector('#dlg-ideas .pie');
+    const ver = Object.assign(document.createElement('a'), { className: 'ver' });
+    document.getElementById('ideas').append(ver);
+    const z = (e) => Number(getComputedStyle(e).zIndex) || 0;
+    return { pie: z(pie), ver: z(ver) };
+  });
+  expect(capas.pie).toBeGreaterThan(capas.ver);
+});
+
 test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ page, browser }) => {
   await sinRed(page);
   await page.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
@@ -996,14 +1009,14 @@ test('los lugares que el asistente no pudo situar los sitúa la app al abrir el 
 test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) => {
   await sinRed(page);
   await sembrar(page, [viaje()], { novedadesVistas: false });
-  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '19'); sessionStorage.setItem('vista', '1'); } });
+  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '20'); sessionStorage.setItem('vista', '1'); } });
   await page.goto('/');
   const ventana = page.getByRole('dialog', { name: /Novedades de Rumbo/ });
   await expect(ventana).toBeVisible();
   // Con una sola versión no hay título por versión, ni restos como «null».
-  await expect(ventana).toContainText('papelera durante 7 días');
+  await expect(ventana).toContainText('botones ↗');
   await expect(ventana).not.toContainText('null');
-  await expect(ventana).not.toContainText('dentro de su etiqueta');
+  await expect(ventana).not.toContainText('papelera durante 7 días');
   await ventana.getByRole('button', { name: 'Entendido' }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
@@ -1011,7 +1024,7 @@ test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) 
   // Desde Ajustes se pueden volver a ver.
   await page.getByRole('button', { name: 'Ajustes' }).click();
   await page.getByRole('button', { name: 'Ver novedades' }).click();
-  await expect(ventana).toContainText('pellizcar');
+  await expect(ventana).toContainText('dentro de su etiqueta');
 });
 
 test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {
