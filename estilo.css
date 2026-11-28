@@ -241,3 +241,6 @@ textarea { resize: vertical; }
 .destinos { position: fixed; top: max(8px, env(safe-area-inset-top)); left: 8px; right: 8px; z-index: 30; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; pointer-events: none; }
 .destinos span { padding: 8px 12px; border-radius: 999px; background: var(--fondo); border: 2px solid var(--c); font-weight: 650; box-shadow: 0 2px 8px #0002; }
 .destinos span.encima { background: var(--c); color: #fff; }
+/* Con el teclado abierto, la hoja se apoya encima de él y cabe en lo que queda de pantalla. */
+.con-teclado dialog { margin: auto auto var(--teclado); max-height: calc(var(--visible) - 12px); border-radius: 22px 22px 0 0; padding-bottom: 18px; }
+.maplibregl-ctrl-group .centrar-mapa { display: grid; place-items: center; width: 29px; height: 29px; min-height: 0; color: #333; }

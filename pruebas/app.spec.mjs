@@ -243,6 +243,22 @@ test('comer cerca enseña más sitios al pedirlo y mide la distancia también al
   await expect(dialogo.getByRole('button', { name: /Ver más/ })).toHaveCount(0);
 });
 
+test('los popups se abren sin sacar el teclado, salvo el conversor', async ({ page }) => {
+  await sinRed(page);
+  await page.route('https://open.er-api.com/**', (r) => r.fulfill({ json: { result: 'success', rates: { CZK: 24.4 } } }));
+  await sembrar(page, [viaje({ pais: 'CZ', lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Editar viaje' }).click();
+  await expect(page.getByRole('heading', { name: 'Editar viaje' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Añadir', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Añadir lugares' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: /Conversor/ }).click();
+  await expect(page.getByLabel('Euros (€)')).toBeFocused();
+});
+
 test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ page, browser }) => {
   await sinRed(page);
   await page.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });

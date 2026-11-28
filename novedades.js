@@ -6,6 +6,8 @@ export const NOVEDADES = [
     cosas: [
       '🍽️ «Comer cerca» encuentra todos los sitios de la zona, también en los centros con cientos de restaurantes, y con «Ver más» enseña los siguientes.',
       '🏨 Junto a cada sitio pone si queda cerca de una parada o del hotel.',
+      '⌨️ Las ventanas ya no quedan debajo del teclado, y al abrirlas no sale el teclado solo (salvo en el conversor, que empieza en euros).',
+      '🎯 El mapa tiene un botón para volver a centrar todas las rutas.',
     ],
   },
   {

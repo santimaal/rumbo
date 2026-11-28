@@ -26,7 +26,7 @@
 
 <dialog id="dlg-viaje" aria-labelledby="viaje-titulo">
   <form method="dialog" id="form-viaje">
-    <h2 id="viaje-titulo">Nuevo viaje</h2>
+    <h2 id="viaje-titulo" tabindex="-1" autofocus>Nuevo viaje</h2>
     <label>¿A dónde vas? <input name="destino" required maxlength="80" placeholder="Escribe una ciudad o un país" autocomplete="off" autocorrect="off"></label>
     <div id="ciudades" aria-live="polite"></div>
     <label>Nombre del viaje (opcional) <input name="nombre" maxlength="80" placeholder="Escapada de mayo" autocomplete="off"></label>
@@ -38,7 +38,7 @@
 
 <dialog id="dlg-lugares" aria-labelledby="lugares-titulo">
   <form method="dialog" id="form-lugares">
-    <h2 id="lugares-titulo">Añadir lugares</h2>
+    <h2 id="lugares-titulo" tabindex="-1" autofocus>Añadir lugares</h2>
     <label>Enlace del reel o TikTok (opcional) <input name="enlace" type="url" inputmode="url" placeholder="https://" autocomplete="off"></label>
     <label>Texto de la publicación <textarea name="texto" rows="5" placeholder="Pega aquí la descripción, o escribe un lugar por línea"></textarea></label>
     <div class="fila"><button type="button" class="suave" id="buscar">Buscar lugares</button><button type="button" class="texto" id="como-consejo">Guardar como consejo</button></div>
@@ -48,7 +48,7 @@
 </dialog>
 <dialog id="dlg-ideas" aria-labelledby="ideas-titulo">
   <form method="dialog" id="form-ideas">
-    <h2 id="ideas-titulo">Qué ver</h2>
+    <h2 id="ideas-titulo" tabindex="-1" autofocus>Qué ver</h2>
     <input type="search" id="buscar-ideas" placeholder="Busca un sitio, un restaurante…" aria-label="Buscar un sitio" autocomplete="off" enterkeyhint="search">
     <p id="estado-ideas" class="tenue" role="status"></p>
     <div id="ideas"></div>
@@ -59,7 +59,7 @@
 
 <dialog id="dlg-nota" aria-labelledby="nota-titulo">
   <form method="dialog" id="form-nota">
-    <h2 id="nota-titulo">Nota</h2>
+    <h2 id="nota-titulo" tabindex="-1" autofocus>Nota</h2>
     <textarea name="texto" rows="7" maxlength="5000" aria-labelledby="nota-titulo" placeholder="Reservas, horarios, recordatorios…"></textarea>
     <div class="fila"><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte">Guardar</button></div>
   </form>
@@ -67,9 +67,9 @@
 
 <dialog id="dlg-consejo" aria-labelledby="consejo-titulo">
   <form method="dialog" id="form-consejo">
-    <h2 id="consejo-titulo">Nuevo consejo</h2>
+    <h2 id="consejo-titulo" tabindex="-1" autofocus>Nuevo consejo</h2>
     <label>Tipo <select name="tipo"></select></label>
-    <label>Consejo <textarea autofocus name="texto" rows="5" maxlength="5000" required placeholder="Pide el menú del día, no el de la carta…"></textarea></label>
+    <label>Consejo <textarea name="texto" rows="5" maxlength="5000" required placeholder="Pide el menú del día, no el de la carta…"></textarea></label>
     <label>Enlace del vídeo (opcional) <input name="enlace" type="url" inputmode="url" placeholder="https://" autocomplete="off"></label>
     <div class="fila"><button type="button" class="texto peligro" id="borrar-consejo" hidden>Borrar</button><button type="button" class="suave" data-cerrar>Cancelar</button><button class="fuerte">Guardar</button></div>
   </form>
@@ -139,9 +139,9 @@
 
 <dialog id="dlg-cambio" aria-labelledby="cambio-titulo">
   <form method="dialog" id="form-cambio">
-    <h2 id="cambio-titulo" tabindex="-1" autofocus>💱 Conversor</h2>
+    <h2 id="cambio-titulo" tabindex="-1">💱 Conversor</h2>
     <p class="tenue" id="cambio-tasa"></p>
-    <label>Euros (€) <input name="euros" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></label>
+    <label>Euros (€) <input name="euros" autofocus type="number" inputmode="decimal" min="0" step="any" placeholder="0"></label>
     <label><span id="cambio-moneda"></span> <input name="local" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></label>
     <p><small>Cambio del día de <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener noreferrer">ExchangeRate-API</a>. Tu banco puede aplicar otro.</small></p>
     <div class="fila"><button class="fuerte">Listo</button></div>

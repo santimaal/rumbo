@@ -1196,12 +1196,13 @@ function arrastrar(e, v, l, li) {
 }
 
 async function pintarMapa(div, v) {
+  let limites;
   try {
     const estilo = await estiloMapa(oscuro());
     if (!div.isConnected) return;
     const visibles = v.lugares.filter((l) => !v.ocultos.includes(l.dia));
     const puntos = [...(visibles.length ? visibles : v.lugares), ...v.hoteles].map((l) => [l.lon, l.lat]);
-    const limites = puntos.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(puntos[0], puntos[0]));
+    limites = puntos.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(puntos[0], puntos[0]));
     mapa = new maplibregl.Map({
       container: div, style: estilo, bounds: limites, fitBoundsOptions: { padding: 40, maxZoom: 15 },
       attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false,
@@ -1212,6 +1213,13 @@ async function pintarMapa(div, v) {
   }
   const este = mapa;
   este.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
+  // Tras moverse por el mapa, vuelve a encuadrar todas las rutas que se ven.
+  const centrar = el('button', {
+    type: 'button', className: 'centrar-mapa', ariaLabel: 'Centrar en las rutas', title: 'Centrar en las rutas',
+    innerHTML: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>',
+    onclick: () => este.fitBounds(limites, { padding: 40, maxZoom: 15 }),
+  });
+  este.addControl({ onAdd: () => el('div', { className: 'maplibregl-ctrl maplibregl-ctrl-group' }, centrar), onRemove: () => {} }, 'top-left');
   const porDia = Array.from({ length: v.dias + 1 }, (_, dia) => (v.ocultos.includes(dia) ? [] : v.lugares.filter((l) => l.dia === dia)));
   porDia.forEach((lugares, dia) => lugares.forEach((l, i) => {
     if (filtro && l.tipo !== filtro) return;
@@ -2306,6 +2314,23 @@ $('archivo').onchange = async (e) => {
     $('archivo').value = '';
   }
 };
+
+// En el móvil el teclado tapa la parte de abajo sin encoger la página: las hojas suben por encima de él.
+function ajustarAlTeclado() {
+  const vista = window.visualViewport;
+  if (!vista) return;
+  const tapa = Math.max(0, Math.round(innerHeight - vista.height - vista.offsetTop));
+  const raiz = document.documentElement;
+  raiz.style.setProperty('--teclado', `${tapa}px`);
+  raiz.style.setProperty('--visible', `${Math.round(vista.height)}px`);
+  raiz.classList.toggle('con-teclado', tapa > 80);
+}
+window.visualViewport?.addEventListener('resize', ajustarAlTeclado);
+window.visualViewport?.addEventListener('scroll', ajustarAlTeclado);
+// El campo en el que se escribe queda a la vista dentro de la hoja cuando sale el teclado.
+addEventListener('focusin', (e) => {
+  if (e.target.matches('dialog input, dialog textarea')) setTimeout(() => e.target.scrollIntoView({ block: 'nearest' }), 350);
+});
 
 ponerTema(document.documentElement.dataset.tema);
 gestoAtras();
