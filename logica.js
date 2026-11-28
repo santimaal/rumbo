@@ -133,11 +133,11 @@ const cierraEse = (v, l, n) => {
  * Reparte las visitas entre los días por tiempo y no por número: sigue la ruta y cada día se lleva una parte de las
  * horas (estancia más trayecto) proporcional a las horas libres que tiene.
  */
-function repartir(lugares, dias, pesos, inicio = null) {
+function repartir(lugares, dias, pesos, inicio = null, largo = 'coche') {
   const ruta = ordenarRuta(lugares, inicio);
   const coste = ruta.map((l, i) => {
     const previo = ruta[i - 1] ?? inicio;
-    return (previo ? minutosTramo(previo, l) : 0) + estanciaDe(l);
+    return (previo ? minutosTramo(previo, l, largo) : 0) + estanciaDe(l);
   });
   const total = coste.reduce((s, c) => s + c, 0) || 1;
   const libre = dias.reduce((s, d) => s + pesos[d - 1], 0);
@@ -188,7 +188,7 @@ function relojDe(v, dia, lista, inicio) {
   let reloj = aterriza === null ? DE : aterriza + 90;
   return lista.map((l, i) => {
     const previo = lista[i - 1] ?? inicio;
-    reloj += previo ? minutosTramo(previo, l) : 0;
+    reloj += previo ? minutosTramo(previo, l, v.movilidad) : 0;
     const llega = reloj;
     reloj += estanciaDe(l);
     return { llega, sale: reloj };
@@ -262,7 +262,7 @@ export function organizar(v, { puesta = () => null } = {}) {
     // Los días sin tiempo libre (llegar de noche, volver de mañana) solo se usan si no hay otros.
     const conTiempo = base.dias.filter((d) => pesos[d - 1] > 0);
     const utiles = conTiempo.length ? conTiempo : base.dias;
-    const visitas = repartir(suyos.filter((l) => !esParaComer(l)), base.dias, pesos, base.hotel);
+    const visitas = repartir(suyos.filter((l) => !esParaComer(l)), base.dias, pesos, base.hotel, v.movilidad);
     moverCerrados(v, visitas, utiles);
     return [...visitas, ...repartirComidas(v, suyos.filter(esParaComer), visitas, utiles, base.hotel)];
   });
@@ -282,10 +282,10 @@ export function estimarLlegada(salida, km, desfaseOrigen, desfaseDestino) {
 const A_PIE_KM = 2;
 /** Parte la ruta en tramos seguidos en coche o andando: se anda cuando el salto en línea recta es corto. */
 // shortcut: no cuenta con volver a por el coche después de andar; cada tramo en coche sale de donde se está
-export function tramosRuta(puntos) {
+export function tramosRuta(puntos, largo = 'coche') {
   const tramos = [];
   for (let i = 1; i < puntos.length; i++) {
-    const modo = distanciaKm(puntos[i - 1], puntos[i]) < A_PIE_KM ? 'pie' : 'coche';
+    const modo = distanciaKm(puntos[i - 1], puntos[i]) < A_PIE_KM ? 'pie' : largo;
     const ultimo = tramos.at(-1);
     if (ultimo?.modo === modo) ultimo.puntos.push(puntos[i]);
     else tramos.push({ modo, puntos: [puntos[i - 1], puntos[i]] });
@@ -297,7 +297,7 @@ export function tramosRuta(puntos) {
 export const claveRuta = (puntos) => puntos.map((p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`).join(';');
 
 /** Línea de OSRM (polilínea de Google con 5 decimales) como [lon, lat]. */
-export function decodificarPolilinea(texto) {
+export function decodificarPolilinea(texto, precision = 5) {
   const puntos = [];
   let lat = 0;
   let lon = 0;
@@ -314,7 +314,7 @@ export function decodificarPolilinea(texto) {
       const delta = valor & 1 ? ~(valor >> 1) : valor >> 1;
       if (eje) lon += delta; else lat += delta;
     }
-    puntos.push([lon / 1e5, lat / 1e5]);
+    puntos.push([lon / 10 ** precision, lat / 10 ** precision]);
   }
   return puntos;
 }
@@ -418,8 +418,9 @@ export function enlaceLugar(app, l, destino) {
 }
 
 /** Enlaces con la ruta: uno por tramo en coche o a pie, y más si pasa de las 9 paradas intermedias que admite Google. */
-export function enlacesRuta(app, puntos) {
-  return tramosRuta(puntos).flatMap((t) => enlacesTramo(app, t.puntos, t.modo === 'pie' ? 'walking' : 'driving')
+const MODO_MAPAS = { pie: 'walking', coche: 'driving', publico: 'transit' };
+export function enlacesRuta(app, puntos, largo = 'coche') {
+  return tramosRuta(puntos, largo).flatMap((t) => enlacesTramo(app, t.puntos, MODO_MAPAS[t.modo])
     .map((href) => ({ href, modo: t.modo })));
 }
 
@@ -427,6 +428,8 @@ function enlacesTramo(app, puntos, modo) {
   // Waze solo guía en coche y hacia un destino: un enlace por parada, y los tramos a pie van a Google Maps.
   if (app === 'waze' && modo === 'driving') return puntos.slice(1).map((p) => `https://waze.com/ul?ll=${par(p)}&navigate=yes`);
   if (app === 'waze') return enlacesTramo('google', puntos, modo);
+  // En transporte público los mapas no admiten paradas intermedias: un enlace por trayecto.
+  if (modo === 'transit' && puntos.length > 2) return puntos.slice(1).flatMap((p, i) => enlacesTramo(app, [puntos[i], p], modo));
   const enlaces = [];
   for (let i = 0; i < puntos.length - 1; i += 10) {
     const trozo = puntos.slice(i, i + 11);
@@ -550,10 +553,11 @@ export function mejorHueco(puntos, x) {
 export const ESTANCIA = { monumento: 60, museo: 120, comida: 75, cafe: 30, copas: 60, helado: 15, mirador: 20, naturaleza: 60, compras: 45, otro: 45 };
 export const estanciaDe = (l) => l.estancia || ESTANCIA[l.tipo] || 45;
 
-/** Minutos de un tramo sin ruta real: andando a 4,5 km/h o en coche a 30 km/h, con un 30 % de rodeo. */
-export function minutosTramo(a, b) {
+/** Minutos de un tramo sin ruta real, con un 30 % de rodeo: andando a 4,5 km/h si está cerca; si no, en coche a 30 km/h o en transporte público a 18 km/h con la espera. */
+export function minutosTramo(a, b, largo = 'coche') {
   const km = distanciaKm(a, b);
-  return km < A_PIE_KM ? (km * 1.3 / 4.5) * 60 : (km * 1.3 / 30) * 60 + 5;
+  if (km < A_PIE_KM) return (km * 1.3 / 4.5) * 60;
+  return largo === 'publico' ? (km * 1.3 / 18) * 60 + 12 : (km * 1.3 / 30) * 60 + 5;
 }
 
 // Se redondea antes de partir en horas y minutos: si no, 16:59,7 saldría como «16:60».
@@ -636,6 +640,8 @@ export function validarViajes(datos) {
       dias,
       zona: zonaValida(v.zona),
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(v.fecha) ? v.fecha : '',
+      // Cómo se hacen los trayectos que no son a pie. Solo se guarda si alguien lo ha elegido.
+      ...(v.movilidad && { movilidad: v.movilidad === 'publico' ? 'publico' : 'coche' }),
       ida: vueloValido(v.ida),
       vuelta: vueloValido(v.vuelta),
       hoteles: (Array.isArray(v.hoteles) ? v.hoteles : []).filter(coordenadas).map((h) => ({

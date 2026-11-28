@@ -36,6 +36,12 @@ async function sinRed(page, { horarios = [], nube = false } = {}) {
       const legs = Array.from({ length: piernas }, () => pierna);
       return json({ routes: [{ distance: pierna.distance * piernas, duration: pierna.duration * piernas, geometry: '_p~iF~ps|U_ulLnnqC', legs }] });
     }
+    if (url.host === 'api.transitous.org') {
+      // En transporte público, 13 minutos con el metro A en medio.
+      const tramo = (mode, distance, duration, extra = {}) => ({ mode, distance, duration, ...extra });
+      return json({ direct: [{ duration: 3600, legs: [tramo('WALK', 4000, 3600)] }], itineraries: [{ duration: 780, legs: [
+        tramo('WALK', 300, 300), tramo('SUBWAY', 5000, 300, { routeShortName: 'A' }), tramo('WALK', 200, 180)] }] });
+    }
     if (url.host === 'overpass-api.de') return json({ elements: horarios });
     if (url.host === 'www.wikidata.org') return json({ query: { pages: [] }, entities: {} });
     if (url.host === 'photon.komoot.io') return json({ features: [] });
@@ -126,8 +132,8 @@ test('cada día muestra ruta real, tiempo y horarios', async ({ page }) => {
   // Hotel lejos del centro: se va en coche al Coliseo y de ahí andando al Panteón.
   await sembrar(page, [viaje({ fecha: hoy, hoteles: [{ nombre: 'Hotel Ostia', lat: 41.7558, lon: 12.2916, desde: 1 }],
     lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
+  // Es de hoy: se abre solo.
   await page.goto('/');
-  await page.getByText('Roma', { exact: true }).click();
   const dia1 = page.locator('.dia').first();
   await expect(dia1).toContainText('🚗 16 km (30 min) + 🚶 600 m (8 min)');
   await expect(dia1.locator('.parada', { hasText: 'Coliseo' }).locator('.tramo')).toHaveText('🚗 15 min · 8 km');
@@ -163,6 +169,59 @@ test('arrastrar una parada la mueve a otro día', async ({ page }) => {
   await page.mouse.up();
   await expect.poll(async () => (await guardados(page))[0].lugares.map((l) => `${l.nombre}:${l.dia}`)).toEqual(['Panteón:2', 'Coliseo:2']);
   await expect(page.locator('.dia').nth(1)).toContainText('Coliseo');
+});
+
+test('arrastrando una parada a un día de arriba se lleva a un día que no se ve', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 2)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Ver solo el día 1' }).click();
+  const asa = page.getByRole('button', { name: 'Arrastrar Coliseo' });
+  await asa.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+  const a = await asa.boundingBox();
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + 20, a.y + 30, { steps: 3 });
+  const chip = page.locator('.destinos span', { hasText: 'Día 2' });
+  const c = await chip.boundingBox();
+  await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2, { steps: 8 });
+  await expect(chip).toHaveClass(/encima/);
+  await page.mouse.up();
+  await expect.poll(async () => (await guardados(page))[0].lugares.map((l) => `${l.nombre}:${l.dia}`)).toEqual(['Panteón:2', 'Coliseo:2']);
+  await expect(page.locator('.destinos')).toHaveCount(0);
+  await expect(page.getByText('Coliseo: al día 2.')).toBeVisible();
+});
+
+test('durante el viaje se abre en el día de hoy con la siguiente parada', async ({ page }) => {
+  await sinRed(page);
+  await page.clock.setFixedTime(new Date(`${hoy}T11:00:00`));
+  await sembrar(page, [viaje({ fecha: hoy, lugares: [
+    lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1), lugar('c', 'Trevi', 41.9009, 12.4833, 1)] })]);
+  await page.goto('/');
+  const tarjeta = page.getByRole('region', { name: 'Hoy' });
+  await expect(tarjeta).toContainText('📍 Hoy · Día 1');
+  // Sin hotel se empieza a las 9: a las 11 ya se ha visto el Coliseo y se está en el Panteón.
+  await expect(tarjeta).toContainText('Ahora: Panteón');
+  await expect(tarjeta).toContainText('Siguiente: Trevi');
+  await expect(tarjeta.getByRole('link', { name: 'Ir' })).toHaveAttribute('href', /destination=41\.9009,12\.4833/);
+  // Atrás vuelve a la lista de viajes.
+  await page.getByRole('button', { name: '‹ Viajes' }).click();
+  await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
+});
+
+test('los trayectos largos pueden ir en transporte público', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Villa Adriana', 41.9420, 12.7740, 1)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Editar viaje' }).click();
+  await page.getByLabel('Para lo que no se hace andando').selectOption('publico');
+  await page.getByRole('button', { name: 'Guardar' }).click();
+  const dia1 = page.locator('.dia').first();
+  await expect(dia1.locator('.parada', { hasText: 'Villa Adriana' }).locator('.tramo')).toHaveText('🚇 13 min · Metro A');
+  await expect(dia1.getByRole('link', { name: /🚇 Ruta/ }).first()).toHaveAttribute('href', /travelmode=transit/);
+  await expect.poll(async () => (await guardados(page))[0].movilidad).toBe('publico');
 });
 
 test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ page, browser }) => {
@@ -450,7 +509,6 @@ test('busca dónde comer cerca de la ruta y lo mete entre las paradas', async ({
   ] });
   await sembrar(page, [viaje({ fecha: hoy, lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
   await page.goto('/');
-  await page.getByText('Roma', { exact: true }).click();
   await page.locator('.dia').first().getByRole('button', { name: '🍽️ Comer cerca' }).click();
   const dialogo = page.getByRole('dialog', { name: /Comer cerca/ });
   await expect(dialogo.getByText('Osteria del Foro')).toBeVisible();

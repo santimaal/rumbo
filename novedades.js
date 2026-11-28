@@ -2,6 +2,15 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 15,
+    cosas: [
+      '📍 Durante el viaje la app se abre en el día de hoy y te dice qué toca ahora, cuál es la siguiente parada y a qué hora salir.',
+      '🚇 En «Editar viaje» puedes elegir moverte en transporte público: rutas y tiempos con metro, tranvía y bus.',
+      '✋ Al arrastrar una parada, arriba salen todos los días para soltarla en el que quieras, aunque no se vea.',
+      '🤖 El asistente de IA organiza los viajes que crea igual que la app.',
+    ],
+  },
+  {
     version: 14,
     cosas: [
       '🧭 Organizar reparte por las horas que ocupa cada visita, evita los días que cierra cada sitio y deja la comida a mediodía y la cena por la tarde.',

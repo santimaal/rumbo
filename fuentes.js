@@ -230,6 +230,37 @@ export async function rutaReal(puntos, aPie) {
   };
 }
 
+const VEHICULOS = { SUBWAY: 'Metro', TRAM: 'Tranvía', BUS: 'Bus', COACH: 'Autobús', FERRY: 'Barco', FUNICULAR: 'Funicular', AERIAL_LIFT: 'Teleférico' };
+const vehiculo = (l) => `${VEHICULOS[l.mode] ?? 'Tren'} ${l.routeShortName || l.displayName || ''}`.trim();
+
+/**
+ * Trayectos en transporte público entre puntos seguidos (Transitous, con los horarios abiertos de cada ciudad).
+ * `cuando` es la hora de salida en ISO; se elige el viaje más corto, o ir andando si tarda menos.
+ */
+export async function rutaPublica(puntos, cuando) {
+  const piernas = [];
+  const linea = [];
+  for (let i = 1; i < puntos.length; i++) {
+    const [a, b] = [puntos[i - 1], puntos[i]];
+    const datos = await pedir('https://api.transitous.org/api/v1/plan', { fromPlace: `${a.lat},${a.lon}`, toPlace: `${b.lat},${b.lon}`, time: cuando }, 1000);
+    const opciones = [...(datos?.itineraries ?? []), ...(datos?.direct ?? [])];
+    if (!opciones.length) return null;
+    const mejor = opciones.reduce((x, y) => (y.duration < x.duration ? y : x));
+    const enVehiculo = mejor.legs.filter((l) => l.mode !== 'WALK');
+    piernas.push({
+      min: mejor.duration / 60,
+      // Los tramos en vehículo no traen distancia: se estima por la línea recta entre sus paradas.
+      km: mejor.legs.reduce((s, l) => s + (l.distance ? l.distance / 1000 : distanciaKm(l.from, l.to) * 1.2), 0),
+      lineas: enVehiculo.map(vehiculo).join(' · '),
+    });
+    for (const l of mejor.legs) if (l.legGeometry?.points) linea.push(...decodificarPolilinea(l.legGeometry.points, l.legGeometry.precision ?? 5));
+  }
+  return {
+    km: piernas.reduce((s, p) => s + p.km, 0), min: piernas.reduce((s, p) => s + p.min, 0), modo: 'publico',
+    linea: linea.length > 1 ? linea : puntos.map((p) => [p.lon, p.lat]), piernas,
+  };
+}
+
 const OVERPASS = [
   'https://overpass-api.de/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',

@@ -372,3 +372,15 @@ assert.equal(hora(24 * 60 + 5), '00:05');
   const orden = organizar(v, { puesta: () => 16 * 60 }).map((l) => l.id);
   assert.ok(orden.indexOf('M') < orden.length - 1, orden.join());
 }
+// Transporte público: los trayectos largos van en él, con su espera, y los mapas reciben un enlace por trayecto.
+{
+  const [a, b, c] = [{ lat: 0, lon: 0 }, { lat: 0, lon: 0.1 }, { lat: 0, lon: 0.2 }];
+  assert.ok(minutosTramo(a, b, 'publico') > minutosTramo(a, b));
+  assert.equal(minutosTramo(a, { lat: 0, lon: 0.001 }, 'publico'), minutosTramo(a, { lat: 0, lon: 0.001 }));
+  assert.deepEqual(tramosRuta([a, b, c], 'publico').map((t) => t.modo), ['publico']);
+  const enlaces = enlacesRuta('google', [a, b, c], 'publico');
+  assert.equal(enlaces.length, 2);
+  assert.ok(enlaces.every((e) => e.href.includes('travelmode=transit') && !e.href.includes('waypoints')));
+  assert.equal(validarViajes({ viajes: [{ lugares: [], movilidad: 'publico' }] })[0].movilidad, 'publico');
+  assert.equal('movilidad' in validarViajes({ viajes: [{ lugares: [] }] })[0], false);
+}

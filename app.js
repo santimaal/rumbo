@@ -6,7 +6,7 @@ import {
   atardecer, salidaAeropuerto, monedaDe,
 } from './logica.js';
 import {
-  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, buscarHorarios, prevision, buscarComida, nube, escucharViaje, avisarCambio, estarEn, husoDe, cambiosDelEuro,
+  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, rutaPublica, buscarHorarios, prevision, buscarComida, nube, escucharViaje, avisarCambio, estarEn, husoDe, cambiosDelEuro,
 } from './fuentes.js';
 import { NOVEDADES } from './novedades.js';
 
@@ -429,6 +429,7 @@ function pintarViaje(v) {
         v.consejos.length ? plural(v.consejos.length, 'consejo', 'consejos') : '', v.nota ? 'nota' : '',
       ].filter(Boolean).join(' · ') || 'vacío' }),
       el('span', { ariaHidden: 'true', textContent: '›' })),
+    tarjetaHoy(v),
     botonCambio(v),
     avisoSolo(v),
     filtrosCategoria(v),
@@ -541,7 +542,17 @@ const rutas = (() => {
   }
 })();
 const rutasFallidas = new Set();
-const rutaDe = (puntos) => rutas[claveRuta(puntos)];
+// Con transporte público la misma ruta da otros tiempos: se guarda aparte.
+const claveDe = (v, puntos) => `${v.movilidad === 'publico' ? 'publico:' : ''}${claveRuta(puntos)}`;
+const rutaDe = (v, puntos) => rutas[claveDe(v, puntos)];
+
+/** Hora para consultar el transporte público: el mismo día de la semana que ese día del viaje, en los próximos 7 días. */
+function cuandoPublico(v, dia) {
+  const hoy = new Date();
+  const objetivo = diaSemana(v, dia) ?? (hoy.getDay() + 1) % 7;
+  const f = new Date(Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + (((objetivo - hoy.getDay() + 7) % 7) || 7), 9));
+  return f.toISOString();
+}
 
 // shortcut: el orden sigue saliendo de la línea recta; la ruta real solo da tiempos y el dibujo.
 let calculandoRutas = false;
@@ -549,15 +560,17 @@ async function completarRutas(v) {
   if (calculandoRutas) return;
   const pendientes = Array.from({ length: v.dias }, (_, i) => {
     const lugares = v.ocultos.includes(i + 1) ? [] : v.lugares.filter((l) => l.dia === i + 1);
-    return lugares.length ? puntosDelDia(v, i + 1, lugares) : [];
-  }).filter((p) => p.length > 1 && p.length <= 50 && !rutaDe(p) && !rutasFallidas.has(claveRuta(p)));
+    return { dia: i + 1, puntos: lugares.length ? puntosDelDia(v, i + 1, lugares) : [] };
+  }).filter(({ puntos: p }) => p.length > 1 && p.length <= 50 && !rutaDe(v, p) && !rutasFallidas.has(claveDe(v, p)));
   if (!pendientes.length) return;
   calculandoRutas = true;
-  for (const puntos of pendientes) {
-    const clave = claveRuta(puntos);
+  for (const { dia, puntos } of pendientes) {
+    const clave = claveDe(v, puntos);
     try {
       const tramos = [];
-      for (const t of tramosRuta(puntos)) tramos.push(await rutaReal(t.puntos, t.modo === 'pie'));
+      for (const t of tramosRuta(puntos, v.movilidad)) {
+        tramos.push(await (t.modo === 'publico' ? rutaPublica(t.puntos, cuandoPublico(v, dia)) : rutaReal(t.puntos, t.modo === 'pie')));
+      }
       if (tramos.every(Boolean)) rutas[clave] = { tramos };
       else rutasFallidas.add(clave);
     } catch {
@@ -594,11 +607,11 @@ async function completarHorarios(v) {
 }
 
 const kmTexto = (km) => (km < 1 ? `${Math.round(km * 100) * 10} m` : `${km.toLocaleString('es', { maximumFractionDigits: 1 })} km`);
-const MODOS = { coche: '🚗', pie: '🚶' };
+const MODOS = { coche: '🚗', pie: '🚶', publico: '🚇' };
 
-/** Totales en coche y a pie del día. */
+/** Totales del día en coche o transporte público y a pie. */
 function textoRuta(real) {
-  return ['coche', 'pie'].map((modo) => {
+  return ['coche', 'publico', 'pie'].map((modo) => {
     const tramos = real.tramos.filter((t) => t.modo === modo);
     if (!tramos.length) return '';
     const km = tramos.reduce((s, t) => s + t.km, 0);
@@ -611,7 +624,8 @@ function textoRuta(real) {
 const llegadas = (real) => [null, ...real.tramos.flatMap((t) => t.piernas.map((p) => ({ ...p, modo: t.modo })))];
 function lineaTramo(llegada) {
   if (!llegada) return null;
-  return el('small', { className: `tramo tramo-${llegada.modo}`, textContent: `${MODOS[llegada.modo]} ${duracion(llegada.min)} · ${kmTexto(llegada.km)}` });
+  const como = llegada.lineas ? llegada.lineas : kmTexto(llegada.km);
+  return el('small', { className: `tramo tramo-${llegada.modo}`, textContent: `${MODOS[llegada.modo]} ${duracion(llegada.min)} · ${como}` });
 }
 
 function lineaHorario(v, l) {
@@ -755,18 +769,15 @@ function diaOculto(v, dia, lugares) {
   return seccion;
 }
 
-function seccionDia(v, dia, lugares) {
-  if (v.ocultos.includes(dia)) return diaOculto(v, dia, lugares);
+/** Ruta, trayectos y horas previstas de un día. */
+function calculoDia(v, dia, lugares) {
   const ends = dia ? extremosDelDia(v, dia) : {};
   const puntos = dia ? puntosDelDia(v, dia, lugares) : [];
-  const real = lugares.length && puntos.length > 1 ? rutaDe(puntos) : null;
-  const km = lugares.length ? largo(puntos) : 0;
-  const rutas = lugares.length ? enlacesRuta(appMapas(), puntos) : [];
+  const real = lugares.length && puntos.length > 1 ? rutaDe(v, puntos) : null;
   const llega = real ? llegadas(real) : [];
   const desplazar = ends.inicio && lugares.length ? 1 : 0;
-  const ponerNota = (t) => { v.notasDia = { ...v.notasDia, [dia]: t }; };
   const trayectos = lugares.map((l, i) => llega[i + desplazar]?.min
-    ?? (i ? minutosTramo(lugares[i - 1], l) : ends.inicio ? minutosTramo(ends.inicio, l) : 0));
+    ?? (i ? minutosTramo(lugares[i - 1], l, v.movilidad) : ends.inicio ? minutosTramo(ends.inicio, l, v.movilidad) : 0));
   const plan = dia && lugares.length ? agenda(v, dia, lugares, trayectos) : null;
   // El último día, lo que cae después de salir hacia el aeropuerto ya no se puede hacer.
   const salida = dia === v.dias ? salidaAeropuerto(v) : null;
@@ -774,6 +785,67 @@ function seccionDia(v, dia, lugares) {
     plan.comidas = plan.comidas.filter((c) => c.hora < salida.sale);
     plan.horas.forEach((h) => { h.tarde = h.sale > salida.sale; });
   }
+  return { ends, puntos, real, llega, desplazar, trayectos, plan };
+}
+
+/** Fecha y hora de ahora en el destino (o en el móvil si aún no se sabe su zona horaria). */
+function ahoraEn(v) {
+  const huso = v.zona && husos.get(claveZona(v.zona));
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: huso || undefined, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const de = (t) => partes.find((p) => p.type === t).value;
+  return { fecha: `${de('year')}-${de('month')}-${de('day')}`, min: Number(de('hour')) * 60 + Number(de('minute')) };
+}
+
+/** Qué día del viaje es hoy, o null si hoy no se está de viaje. */
+function diaDeHoy(v) {
+  if (!v.fecha) return null;
+  const dia = Math.round((Date.parse(`${ahoraEn(v).fecha}T12:00:00Z`) - Date.parse(`${v.fecha}T12:00:00Z`)) / 864e5) + 1;
+  return dia >= 1 && dia <= v.dias ? dia : null;
+}
+
+function verDia(dia) {
+  document.querySelector(`.dia[data-dia="${dia}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/** Durante el viaje: dónde toca estar ahora y cuál es la siguiente parada según el plan del día. */
+function tarjetaHoy(v) {
+  const dia = diaDeHoy(v);
+  if (!dia) return null;
+  const lugares = v.lugares.filter((l) => l.dia === dia);
+  const { plan, trayectos } = calculoDia(v, dia, lugares);
+  const ahora = ahoraEn(v).min;
+  const i = plan ? plan.horas.findIndex((h) => h.sale > ahora) : -1;
+  const actual = i >= 0 && plan.horas[i].llega <= ahora ? i : -1;
+  const siguiente = actual >= 0 ? (actual + 1 < lugares.length ? actual + 1 : -1) : i;
+  const linea = (texto) => el('p', { textContent: texto });
+  const contenido = !lugares.length ? [linea('Hoy no tienes paradas.')]
+    : i === -1 ? [linea('Por hoy ya está todo lo del plan. ¡A descansar!')]
+      : [
+        actual >= 0 ? linea(`Ahora: ${lugares[actual].nombre}, hasta las ${hora(plan.horas[actual].sale)}.`) : null,
+        siguiente >= 0 ? el('div', { className: 'fila' },
+          el('p', {},
+            el('strong', { textContent: `Siguiente: ${lugares[siguiente].nombre}` }), el('br'),
+            el('small', { textContent: [
+              `en el plan, a las ${hora(plan.horas[siguiente].llega)}`,
+              trayectos[siguiente] ? `${duracion(trayectos[siguiente])} de camino: sal a las ${hora(plan.horas[siguiente].llega - trayectos[siguiente])}` : '',
+            ].filter(Boolean).join(' · ') })),
+          enlace('Ir', comoIr(lugares[siguiente]))) : linea('Es la última parada del día.'),
+      ];
+  return el('section', { className: 'hoy', ariaLabel: 'Hoy' },
+    el('div', { className: 'fila' },
+      el('h2', { textContent: `📍 Hoy · Día ${dia}` }),
+      boton('Ver el día', () => verDia(dia), 'texto')),
+    ...contenido.filter(Boolean));
+}
+
+function seccionDia(v, dia, lugares) {
+  if (v.ocultos.includes(dia)) return diaOculto(v, dia, lugares);
+  const { ends, puntos, real, llega, desplazar, plan } = calculoDia(v, dia, lugares);
+  const km = lugares.length ? largo(puntos) : 0;
+  const rutas = lugares.length ? enlacesRuta(appMapas(), puntos, v.movilidad) : [];
+  const ponerNota = (t) => { v.notasDia = { ...v.notasDia, [dia]: t }; };
   const resumen = [
     dia && fechaDelDia(v, dia),
     real ? textoRuta(real)
@@ -1045,18 +1117,33 @@ function arrastrar(e, v, l, li) {
   li.classList.add('arrastrando');
   // La barra de abajo deja pasar el dedo para poder soltar debajo de ella.
   document.body.classList.add('moviendo');
-  document.body.append(fantasma);
+  // Arriba, un botón por día para soltarla en cualquiera aunque no se vea (oculto, o viendo solo un día).
+  const destinos = el('div', { className: 'destinos', ariaHidden: 'true' },
+    ...Array.from({ length: v.dias + 1 }, (_, d) => {
+      const chip = el('span', { textContent: d ? `Día ${d}` : 'Sin día' });
+      chip.style.setProperty('--c', color(d));
+      chip.dataset.dia = d;
+      return chip;
+    }));
+  document.body.append(fantasma, destinos);
   let y = e.clientY;
+  let encima = null;
   // Cerca de los bordes la página se desplaza sola para llegar a otros días.
   let marco = requestAnimationFrame(function desplazar() {
     const borde = 80;
-    if (y < borde) scrollBy(0, -12);
+    if (encima) { /* sobre un día de arriba: quieto */ } else if (y < borde + destinos.offsetHeight) scrollBy(0, -12);
     else if (y > innerHeight - borde) scrollBy(0, 12);
     marco = requestAnimationFrame(desplazar);
   });
   const mover = (ev) => {
     y = ev.clientY;
     fantasma.style.top = `${y - dy}px`;
+    encima = [...destinos.children].find((c) => {
+      const r = c.getBoundingClientRect();
+      return ev.clientX >= r.left && ev.clientX <= r.right && y >= r.top && y <= r.bottom;
+    }) ?? null;
+    [...destinos.children].forEach((c) => c.classList.toggle('encima', c === encima));
+    if (encima) return;
     const debajo = document.elementFromPoint(ev.clientX, y);
     const lista = debajo?.closest('.dia')?.querySelector('.paradas');
     if (!lista) return;
@@ -1076,7 +1163,19 @@ function arrastrar(e, v, l, li) {
     removeEventListener('pointerup', soltar);
     removeEventListener('pointercancel', soltar);
     fantasma.remove();
+    destinos.remove();
     document.body.classList.remove('moviendo');
+    if (encima) {
+      hueco.remove();
+      li.classList.remove('arrastrando');
+      const dia = Number(encima.dataset.dia);
+      if (dia === l.dia) return;
+      l.dia = dia;
+      v.lugares = [...v.lugares.filter((x) => x !== l), l];
+      guardar();
+      avisar(`${l.nombre}: ${dia ? `al día ${dia}` : 'sin día'}.`);
+      return;
+    }
     const dia = Number(hueco.closest('.dia').dataset.dia);
     let siguiente = hueco.nextElementSibling;
     while (siguiente && (!siguiente.dataset.id || siguiente === li)) siguiente = siguiente.nextElementSibling;
@@ -1134,14 +1233,17 @@ async function pintarMapa(div, v) {
   este.on('load', () => porDia.forEach((lugares, dia) => {
     const puntos = dia ? puntosDelDia(v, dia, lugares) : [];
     if (!lugares.length || puntos.length < 2) return;
-    // En coche, línea continua; andando, a trazos.
-    const tramos = rutaDe(puntos)?.tramos ?? tramosRuta(puntos).map((t) => ({ ...t, linea: t.puntos.map((l) => [l.lon, l.lat]) }));
+    // En coche, línea continua; andando, a trazos cortos; en transporte público, a trazos largos.
+    const tramos = rutaDe(v, puntos)?.tramos ?? tramosRuta(puntos, v.movilidad).map((t) => ({ ...t, linea: t.puntos.map((l) => [l.lon, l.lat]) }));
     tramos.forEach((t, i) => {
       const id = `dia-${dia}-${i}`;
       este.addSource(id, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: t.linea } } });
       este.addLayer({
         id, type: 'line', source: id, layout: { 'line-cap': t.modo === 'pie' ? 'butt' : 'round', 'line-join': 'round' },
-        paint: { 'line-color': color(dia), 'line-width': 5, ...(t.modo === 'pie' && { 'line-dasharray': [1.2, 1] }) },
+        paint: {
+          'line-color': color(dia), 'line-width': 5,
+          ...(t.modo === 'pie' && { 'line-dasharray': [1.2, 1] }), ...(t.modo === 'publico' && { 'line-dasharray': [3, 1.2] }),
+        },
       });
     });
   }));
@@ -1407,11 +1509,14 @@ function editarViaje(v) {
   f.elements.destino.setCustomValidity('');
   $('viaje-titulo').textContent = v ? 'Editar viaje' : 'Nuevo viaje';
   if (v) for (const campo of ['nombre', 'destino', 'dias']) f.elements[campo].value = v[campo];
+  f.elements.movilidad.value = v?.movilidad ?? 'coche';
   f.onsubmit = () => {
     const datos = {
       nombre: f.elements.nombre.value.trim() || ciudad?.nombre || v?.nombre || 'Viaje',
       dias: diasValidos(f.elements.dias.value),
       ...(ciudad && { destino: ciudad.destino, zona: ciudad.zona, pais: ciudad.pais }),
+      // Solo se guarda si se cambia, para no tocar los viajes de quien no lo usa.
+      ...((v?.movilidad || f.elements.movilidad.value === 'publico') && { movilidad: f.elements.movilidad.value }),
     };
     if (v) {
       Object.assign(v, datos);
@@ -2201,6 +2306,12 @@ $('archivo').onchange = async (e) => {
 
 ponerTema(document.documentElement.dataset.tema);
 gestoAtras();
+// Si se está de viaje, la app se abre directamente en el día de hoy.
+const deViaje = location.hash ? null : viajes.find((v) => diaDeHoy(v));
+if (deViaje) {
+  ir(deViaje.id);
+  requestAnimationFrame(() => verDia(diaDeHoy(deViaje)));
+}
 recibirViaje();
 // Si Rumbo ya estaba abierto, un enlace nuevo solo cambia lo que va tras # y no recarga la página.
 addEventListener('hashchange', () => recibirViaje());

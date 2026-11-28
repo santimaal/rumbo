@@ -232,3 +232,12 @@ textarea { resize: vertical; }
 .maplibregl-popup-content { color: #12242d; }
 @media (prefers-color-scheme: dark) { :root:not([data-tema="claro"]) .ruta { color: var(--tinta); } }
 :root[data-tema="oscuro"] .ruta { color: var(--tinta); }
+/* Tarjeta de hoy, durante el viaje. */
+.hoy { margin-top: 12px; padding: 10px 14px 12px; border-radius: 14px; background: var(--carta); border-left: 4px solid var(--marca); }
+.hoy h2 { margin: 0; font-size: 1.05rem; }
+.hoy p { margin: 6px 0 0; flex: 1; }
+.hoy .fila { justify-content: space-between; align-items: center; }
+/* Al arrastrar una parada, los días a los que se puede llevar. */
+.destinos { position: fixed; top: max(8px, env(safe-area-inset-top)); left: 8px; right: 8px; z-index: 30; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; pointer-events: none; }
+.destinos span { padding: 8px 12px; border-radius: 999px; background: var(--fondo); border: 2px solid var(--c); font-weight: 650; box-shadow: 0 2px 8px #0002; }
+.destinos span.encima { background: var(--c); color: #fff; }
