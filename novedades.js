@@ -2,6 +2,14 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 17,
+    cosas: [
+      '⏰ Cada parada avisa si llegas antes de que abra, cuando ya ha cerrado o con menos de una hora antes del cierre.',
+      '📶 «Sin conexión» descarga el mapa, las rutas y las fotos del viaje para usarlo sin datos. Hazlo con wifi antes de salir; si cambias lugares, te pide volver a descargar.',
+      '🧹 En Ajustes puedes ver cuánto ocupa Rumbo y borrar lo descargado.',
+    ],
+  },
+  {
     version: 16,
     cosas: [
       '🍽️ «Comer cerca» encuentra todos los sitios de la zona, también en los centros con cientos de restaurantes, y con «Ver más» enseña los siguientes.',

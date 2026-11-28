@@ -3,10 +3,10 @@ import {
   enlaceSeguro, fotoDe, diasValidos, validarViajes, TIPOS_CONSEJO, coincide, tramosRuta, claveRuta, duracion, horarioDelDia, tiempoDe, bandera,
   empaquetar, desempaquetar, mismoViaje, actualizarViaje, CATEGORIAS, adivinarCategoria, mejorHueco,
   ordenarDias, estanciaDe, minutosTramo, hora, agenda, datosNube, fusionar, resumenCambios,
-  atardecer, salidaAeropuerto, monedaDe,
+  atardecer, salidaAeropuerto, monedaDe, avisoHorario, teselasDe,
 } from './logica.js';
 import {
-  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, rutaPublica, buscarHorarios, prevision, buscarComida, nube, escucharViaje, avisarCambio, estarEn, husoDe, cambiosDelEuro,
+  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, rutaPublica, guardarSinConexion, CACHE_MAPAS, buscarHorarios, prevision, buscarComida, nube, escucharViaje, avisarCambio, estarEn, husoDe, cambiosDelEuro,
 } from './fuentes.js';
 import { NOVEDADES } from './novedades.js';
 
@@ -431,6 +431,7 @@ function pintarViaje(v) {
       el('span', { ariaHidden: 'true', textContent: '›' })),
     tarjetaHoy(v),
     botonCambio(v),
+    botonSinConexion(v),
     avisoSolo(v),
     filtrosCategoria(v),
     divMapa,
@@ -556,10 +557,10 @@ function cuandoPublico(v, dia) {
 
 // shortcut: el orden sigue saliendo de la línea recta; la ruta real solo da tiempos y el dibujo.
 let calculandoRutas = false;
-async function completarRutas(v) {
+async function completarRutas(v, { todos = false } = {}) {
   if (calculandoRutas) return;
   const pendientes = Array.from({ length: v.dias }, (_, i) => {
-    const lugares = v.ocultos.includes(i + 1) ? [] : v.lugares.filter((l) => l.dia === i + 1);
+    const lugares = v.ocultos.includes(i + 1) && !todos ? [] : v.lugares.filter((l) => l.dia === i + 1);
     return { dia: i + 1, puntos: lugares.length ? puntosDelDia(v, i + 1, lugares) : [] };
   }).filter(({ puntos: p }) => p.length > 1 && p.length <= 50 && !rutaDe(v, p) && !rutasFallidas.has(claveDe(v, p)));
   if (!pendientes.length) return;
@@ -628,11 +629,21 @@ function lineaTramo(llegada) {
   return el('small', { className: `tramo tramo-${llegada.modo}`, textContent: `${MODOS[llegada.modo]} ${duracion(llegada.min)} · ${como}` });
 }
 
-function lineaHorario(v, l) {
+function lineaHorario(v, l, plan = null) {
   if (!l.horario) return null;
   const semana = l.dia ? diaSemana(v, l.dia) : null;
   const horas = semana === null ? null : horarioDelDia(l.horario, semana);
   if (horas?.length === 0) return el('small', { className: 'horario cerrado', textContent: '⚠ Cerrado ese día' });
+  // Con la hora prevista de llegada, avisa si aún no ha abierto, ya ha cerrado o cierra enseguida.
+  const aviso = plan ? avisoHorario(horas, plan.llega) : null;
+  if (aviso) {
+    const texto = {
+      justo: `⚠ Cierra a las ${hora(aviso.cierra)}: llegas a las ${hora(plan.llega)} y solo tendrías ${duracion(aviso.cierra - plan.llega)}`,
+      antes: `⚠ Llegas a las ${hora(plan.llega)} y no abre hasta las ${hora(aviso.abre)}`,
+      cerrado: `⚠ Llegas a las ${hora(plan.llega)} y cierra a las ${hora(aviso.cierra)}`,
+    }[aviso.tipo];
+    return el('small', { className: 'horario cerrado', textContent: texto });
+  }
   const bonito = (h) => h.replace('-', '–');
   return el('small', { className: 'horario', textContent: horas ? `Ese día abre ${horas.map(bonito).join(' y ')}` : `Horario: ${l.horario}` });
 }
@@ -697,6 +708,63 @@ async function completarCambio(v) {
 }
 
 /** Botón del conversor para los destinos que no usan euros, con el cambio del día a la vista. */
+// Viajes descargados para usar sin conexión: cuándo y con qué lugares, para saber si hay que volver a bajarlos.
+const CLAVE_SIN_CONEXION = 'rumbo-sin-conexion';
+const descargas = () => {
+  try {
+    return JSON.parse(localStorage.getItem(CLAVE_SIN_CONEXION)) ?? {};
+  } catch {
+    return {};
+  }
+};
+const puntosSinConexion = (v) => [...v.lugares, ...v.hoteles, v.ida?.hasta, v.vuelta?.desde].filter(Boolean);
+const firmaSinConexion = (v) => claveRuta(puntosSinConexion(v));
+let descargando = null;
+
+/** Botón para bajar el mapa, las rutas y las fotos del viaje antes de salir, por si allí no hay datos. */
+function botonSinConexion(v) {
+  if (!v.lugares.length || !('caches' in window)) return null;
+  const hecha = descargas()[v.id];
+  const detalle = descargando?.id === v.id ? descargando.texto
+    : !hecha ? 'Descarga el mapa, las rutas y las fotos'
+      : hecha.firma === firmaSinConexion(v) ? `✅ Listo · descargado el ${new Date(hecha.fecha).toLocaleDateString(IDIOMA, { day: 'numeric', month: 'short' })}`
+        : 'Hay cambios: vuelve a descargarlo';
+  return el('button', { type: 'button', className: 'abrir-consejos', onclick: () => descargarViaje(v), disabled: Boolean(descargando) },
+    el('span', { textContent: '📶 Sin conexión' }),
+    el('small', { id: 'estado-sin-conexion', textContent: detalle }),
+    el('span', { ariaHidden: 'true', textContent: '›' }));
+}
+
+async function descargarViaje(v) {
+  if (descargando) return;
+  const contar = (texto) => {
+    descargando.texto = texto;
+    if ($('estado-sin-conexion')) $('estado-sin-conexion').textContent = texto;
+  };
+  descargando = { id: v.id, texto: 'Calculando las rutas…' };
+  pintar();
+  try {
+    while (calculandoRutas) await new Promise((r) => { setTimeout(r, 300); });
+    await completarRutas(v, { todos: true });
+    const fotos = v.lugares.filter((l) => l.foto).map((l) => fotoDe(l.foto, 250));
+    const fallos = await guardarSinConexion(teselasDe(puntosSinConexion(v)), fotos, (hechas, total) => contar(`Descargando… ${Math.round(hechas / total * 100)} %`));
+    localStorage.setItem(CLAVE_SIN_CONEXION, JSON.stringify({ ...descargas(), [v.id]: { fecha: Date.now(), firma: firmaSinConexion(v) } }));
+    avisar(fallos ? `Descargado, salvo ${plural(fallos, 'archivo', 'archivos')} que no se pudieron bajar. Puedes reintentarlo.` : 'Listo: el viaje funciona sin conexión.');
+  } catch {
+    avisar('No se pudo descargar: hace falta conexión. Inténtalo con wifi.');
+  }
+  descargando = null;
+  if (abierto === v.id) pintar();
+}
+
+async function borrarDescargas() {
+  if (!confirm('¿Borrar los mapas y fotos descargados? Los viajes no se tocan.')) return;
+  await caches.delete(CACHE_MAPAS);
+  localStorage.removeItem(CLAVE_SIN_CONEXION);
+  avisar('Descargas borradas.');
+  pintar();
+}
+
 function botonCambio(v) {
   const moneda = monedaDe(v.pais);
   if (!moneda || moneda === 'EUR') return null;
@@ -1089,7 +1157,7 @@ function parada(v, l, i, hermanos, llegada = null, horas = null) {
     el('div', { className: 'ficha' },
       el('div', {},
         el('div', { className: 'nombre-lugar' }, botonCategoria(l), enlace(l.nombre, enlaceLugar(appMapas(), l, v.destino), 'titulo')),
-        el('small', { textContent: l.direccion }), lineaHorario(v, l), horas ? botonHoras(l, horas) : null),
+        el('small', { textContent: l.direccion }), lineaHorario(v, l, horas), horas ? botonHoras(l, horas) : null),
       l.foto ? miniatura(l, v.destino) : null),
     nota(l.nota, `Nota de ${l.nombre}`, ponerNota),
     el('div', { className: 'fila' },
@@ -1951,6 +2019,11 @@ function abrirAjustes() {
   f.elements.mapas.onchange = (e) => localStorage.setItem(CLAVE_MAPAS, e.target.value);
   f.elements.tema.onchange = (e) => ponerTema(e.target.value);
   $('exportar').onclick = exportar;
+  $('borrar-descargas').onclick = () => { $('dlg-ajustes').close(); borrarDescargas(); };
+  $('espacio-descargas').textContent = '';
+  navigator.storage?.estimate?.().then(({ usage }) => {
+    if (usage) $('espacio-descargas').textContent = `Rumbo ocupa ${(usage / 1e6).toLocaleString(IDIOMA, { maximumFractionDigits: 0 })} MB en este dispositivo.`;
+  });
   $('importar').onclick = () => { $('dlg-ajustes').close(); $('archivo').click(); };
   $('buscar-version').onclick = () => { $('dlg-ajustes').close(); buscarVersion(); };
   $('ver-novedades').onclick = () => { $('dlg-ajustes').close(); abrirNovedades(NOVEDADES.slice(0, 3)); };

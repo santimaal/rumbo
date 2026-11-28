@@ -354,6 +354,23 @@ export function horarioDelDia(etiqueta, dia) {
   return entendidas ? resultado ?? [] : null;
 }
 
+/**
+ * Si al llegar a una parada aún no ha abierto, ya ha cerrado o cierra en menos de una hora.
+ * `rangos` son las horas de ese día (de horarioDelDia) y `llega`, la hora de llegada en minutos.
+ */
+export function avisoHorario(rangos, llega) {
+  if (!rangos?.length) return null;
+  const tramos = rangos.map((r) => {
+    const [a, b] = r.split('-').map(minutos);
+    return [a, b <= a ? b + 1440 : b];
+  }).filter(([a, b]) => a !== null && b !== null);
+  if (!tramos.length) return null;
+  const dentro = tramos.find(([a, b]) => llega >= a && llega < b);
+  if (dentro) return dentro[1] - llega < 60 ? { tipo: 'justo', cierra: dentro[1] } : null;
+  const luego = tramos.filter(([a]) => a > llega).sort((x, y) => x[0] - y[0])[0];
+  return luego ? { tipo: 'antes', abre: luego[0] } : { tipo: 'cerrado', cierra: Math.max(...tramos.map(([, b]) => b)) };
+}
+
 const TIEMPOS = [
   [[0], '☀️', 'despejado'], [[1, 2], '🌤️', 'algo nuboso'], [[3], '☁️', 'nublado'], [[45, 48], '🌫️', 'niebla'],
   [[51, 53, 55, 56, 57], '🌦️', 'llovizna'], [[61, 63, 65, 66, 67], '🌧️', 'lluvia'], [[71, 73, 75, 77], '❄️', 'nieve'],
@@ -807,6 +824,36 @@ export function atardecer(fechaISO, lat, lon) {
   const cosH = (Math.sin(-0.833 * rad) - Math.sin(lat * rad) * Math.sin(decl)) / (Math.cos(lat * rad) * Math.cos(decl));
   if (Math.abs(cosH) > 1) return null;
   return new Date((transito + Math.acos(cosH) / rad / 360 - 2440587.5) * 864e5);
+}
+
+/**
+ * Teselas de mapa [z, x, y] para tener la zona sin conexión: con poco zoom, el recuadro de todos los puntos;
+ * con mucho zoom, solo lo que queda a `radioKm` de cada punto, para no descargar el campo de alrededor.
+ */
+export function teselasDe(puntos, { lejos = [10, 13], cerca = [14, 16], radioKm = 0.8 } = {}) {
+  if (!puntos.length) return [];
+  const tesela = (lat, lon, z) => {
+    const n = 2 ** z;
+    const y = (1 - Math.asinh(Math.tan(lat * rad)) / Math.PI) / 2 * n;
+    return [Math.floor((lon + 180) / 360 * n), Math.floor(y)];
+  };
+  const vistas = new Set();
+  const cubrir = (sur, oeste, norte, este, z) => {
+    const [x1, y1] = tesela(norte, oeste, z);
+    const [x2, y2] = tesela(sur, este, z);
+    for (let x = x1; x <= x2; x++) for (let y = y1; y <= y2; y++) vistas.add(`${z}/${x}/${y}`);
+  };
+  const lats = puntos.map((p) => p.lat);
+  const lons = puntos.map((p) => p.lon);
+  for (let z = lejos[0]; z <= lejos[1]; z++) cubrir(Math.min(...lats) - 0.02, Math.min(...lons) - 0.03, Math.max(...lats) + 0.02, Math.max(...lons) + 0.03, z);
+  for (let z = cerca[0]; z <= cerca[1]; z++) {
+    for (const p of puntos) {
+      const dLat = radioKm / 111;
+      const dLon = radioKm / (111 * Math.cos(p.lat * rad));
+      cubrir(p.lat - dLat, p.lon - dLon, p.lat + dLat, p.lon + dLon, z);
+    }
+  }
+  return [...vistas].map((t) => t.split('/').map(Number));
 }
 
 const ANTES_DEL_VUELO = 120;

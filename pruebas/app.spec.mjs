@@ -259,6 +259,49 @@ test('los popups se abren sin sacar el teclado, salvo el conversor', async ({ pa
   await expect(page.getByLabel('Euros (€)')).toBeFocused();
 });
 
+test('avisa si llegas a un sitio antes de que abra, cuando cierra o justo antes de cerrar', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ fecha: '2026-12-10', lugares: [
+    lugar('a', 'Coliseo', 41.8902, 12.4922, 1, { horario: '10:00-18:00', estancia: 120 }),
+    lugar('b', 'Foro', 41.8925, 12.4853, 1, { horario: '09:00-11:30', estancia: 60 }),
+    lugar('c', 'Panteón', 41.8986, 12.4769, 1, { horario: '09:00-19:00' }),
+  ] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  const dia1 = page.locator('.dia').first();
+  await expect(dia1.locator('.parada', { hasText: 'Coliseo' }).locator('.horario')).toHaveText('⚠ Llegas a las 09:00 y no abre hasta las 10:00');
+  await expect(dia1.locator('.parada', { hasText: 'Foro' }).locator('.horario')).toHaveText(/⚠ Cierra a las 11:30: llegas a las 11:\d\d y solo tendrías \d+ min/);
+  await expect(dia1.locator('.parada', { hasText: 'Panteón' }).locator('.horario')).toHaveText('Ese día abre 09:00–19:00');
+});
+
+test('descarga el mapa, las rutas y las fotos para usar el viaje sin conexión', async ({ page }) => {
+  await sinRed(page);
+  const OFM = 'https://tiles.openfreemap.org';
+  await page.route(`${OFM}/**`, (route) => {
+    const { pathname } = new URL(route.request().url());
+    if (pathname.startsWith('/styles/')) {
+      return route.fulfill({ json: { version: 8, sources: { openmaptiles: { type: 'vector', url: `${OFM}/planet` } }, sprite: `${OFM}/sprites/x/ofm`,
+        glyphs: `${OFM}/fonts/{fontstack}/{range}.pbf`, layers: [{ id: 'fondo', type: 'background', layout: {}, paint: {} }] } });
+    }
+    if (pathname === '/planet') return route.fulfill({ json: { tilejson: '3.0.0', tiles: [`${OFM}/planet/v1/{z}/{x}/{y}.pbf`] } });
+    return route.fulfill({ body: '' });
+  });
+  await sembrar(page, [viaje({ lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('b', 'Panteón', 41.8986, 12.4769, 1)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  const boton = page.getByRole('button', { name: /Sin conexión/ });
+  await expect(boton).toContainText('Descarga el mapa, las rutas y las fotos');
+  await boton.click();
+  await expect(page.getByRole('button', { name: /Sin conexión/ })).toContainText('✅ Listo', { timeout: 20000 });
+  const guardados = await page.evaluate(async () => (await (await caches.open('rumbo-mapas')).keys()).map((r) => r.url));
+  expect(guardados.filter((u) => /\/planet\/v1\/16\//.test(u)).length).toBeGreaterThan(10);
+  expect(guardados).toContain(`${OFM}/styles/dark?`);
+  // Si cambian los lugares, pide volver a descargar.
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: 'Quitar Panteón' }).click();
+  await expect(page.getByRole('button', { name: /Sin conexión/ })).toContainText('Hay cambios: vuelve a descargarlo');
+});
+
 test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ page, browser }) => {
   await sinRed(page);
   await page.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
@@ -820,14 +863,14 @@ test('los lugares que el asistente no pudo situar los sitúa la app al abrir el 
 test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) => {
   await sinRed(page);
   await sembrar(page, [viaje()], { novedadesVistas: false });
-  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '15'); sessionStorage.setItem('vista', '1'); } });
+  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '16'); sessionStorage.setItem('vista', '1'); } });
   await page.goto('/');
   const ventana = page.getByRole('dialog', { name: /Novedades de Rumbo/ });
   await expect(ventana).toBeVisible();
   // Con una sola versión no hay título por versión, ni restos como «null».
-  await expect(ventana).toContainText('«Ver más»');
+  await expect(ventana).toContainText('descarga el mapa');
   await expect(ventana).not.toContainText('null');
-  await expect(ventana).not.toContainText('transporte público');
+  await expect(ventana).not.toContainText('«Ver más»');
   await ventana.getByRole('button', { name: 'Entendido' }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
@@ -835,7 +878,7 @@ test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) 
   // Desde Ajustes se pueden volver a ver.
   await page.getByRole('button', { name: 'Ajustes' }).click();
   await page.getByRole('button', { name: 'Ver novedades' }).click();
-  await expect(ventana).toContainText('a la izquierda para borrarlo');
+  await expect(ventana).toContainText('transporte público');
 });
 
 test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {

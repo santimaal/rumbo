@@ -217,6 +217,51 @@ export function estiloMapa(oscuro = false) {
   return estilos[nombre];
 }
 
+// Lo descargado para usar sin conexión: el service worker lo sirve cuando no hay red. No se borra al actualizar la app.
+export const CACHE_MAPAS = 'rumbo-mapas';
+const OFM = 'https://tiles.openfreemap.org';
+const RANGOS_LETRAS = ['0-255', '256-511', '8192-8447'];
+
+/**
+ * Guarda el mapa de la zona (estilos claro y oscuro, letras, iconos y las teselas pedidas) y las fotos.
+ * `avance(hechas, total)` cuenta cada archivo; devuelve cuántos no se pudieron bajar.
+ */
+export async function guardarSinConexion(teselas, fotos, avance = () => {}) {
+  const cache = await caches.open(CACHE_MAPAS);
+  const bajar = async (url, opciones) => {
+    const r = await fetch(url, { ...opciones, signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error(`${r.status}`);
+    await cache.put(url, r.clone());
+    return r;
+  };
+  const estilos = await Promise.all(['bright', 'dark'].map(async (n) => (await bajar(`${OFM}/styles/${n}?`)).json()));
+  const fuente = estilos[0].sources.openmaptiles.url;
+  const plantilla = (await (await bajar(fuente)).json()).tiles[0];
+  const letras = new Set(estilos.flatMap((e) => e.layers.map((l) => l.layout?.['text-font'])
+    .filter((t) => Array.isArray(t) && t.every((x) => typeof x === 'string')).map((t) => t.join(','))));
+  const sprites = [...new Set(estilos.map((e) => e.sprite))].flatMap((s) => ['.json', '.png', '@2x.json', '@2x.png'].map((x) => `${s}${x}`));
+  const urls = [
+    ...sprites,
+    ...[...letras].flatMap((f) => RANGOS_LETRAS.map((r) => estilos[0].glyphs.replace('{fontstack}', encodeURIComponent(f)).replace('{range}', r))),
+    ...teselas.map(([z, x, y]) => plantilla.replace('{z}', z).replace('{x}', x).replace('{y}', y)),
+  ].map((url) => ({ url })).concat(fotos.map((url) => ({ url })));
+  let hechas = 0;
+  let fallos = 0;
+  const cola = [...urls];
+  // Unas pocas descargas a la vez, para no saturar el servidor gratuito de mapas.
+  await Promise.all(Array.from({ length: 6 }, async () => {
+    for (let t = cola.shift(); t; t = cola.shift()) {
+      try {
+        await bajar(t.url, t.opciones);
+      } catch {
+        fallos++;
+      }
+      avance(++hechas, urls.length);
+    }
+  }));
+  return fallos;
+}
+
 /** Ruta real a pie o en coche por las calles, con su línea para el mapa. */
 export async function rutaReal(puntos, aPie) {
   const perfil = aPie ? 'routed-foot' : 'routed-car';

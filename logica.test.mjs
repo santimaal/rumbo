@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje, adivinarCategoria, mejorHueco, ordenarDias, agenda, hora, minutosTramo, datosNube, fusionar, resumenCambios, atardecer, salidaAeropuerto, monedaDe } from './logica.js';
+import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje, adivinarCategoria, mejorHueco, ordenarDias, agenda, hora, minutosTramo, datosNube, fusionar, resumenCambios, atardecer, salidaAeropuerto, monedaDe, avisoHorario, teselasDe } from './logica.js';
 
 assert.deepEqual(
   extraerLugares('Lo mejor de Roma 😍\n📍 Trattoria Da Enzo - la mejor pasta\n📍Panteón 📍 Coliseo (reserva!)\n#roma #viajes'),
@@ -383,4 +383,24 @@ assert.equal(hora(24 * 60 + 5), '00:05');
   assert.ok(enlaces.every((e) => e.href.includes('travelmode=transit') && !e.href.includes('waypoints')));
   assert.equal(validarViajes({ viajes: [{ lugares: [], movilidad: 'publico' }] })[0].movilidad, 'publico');
   assert.equal('movilidad' in validarViajes({ viajes: [{ lugares: [] }] })[0], false);
+}
+// Avisos de horario al llegar: cerrado, aún sin abrir o a punto de cerrar.
+{
+  assert.equal(avisoHorario(['10:00-18:00'], 12 * 60), null);
+  assert.deepEqual(avisoHorario(['10:00-18:00'], 17 * 60 + 20), { tipo: 'justo', cierra: 18 * 60 });
+  assert.deepEqual(avisoHorario(['10:00-18:00'], 9 * 60 + 15), { tipo: 'antes', abre: 10 * 60 });
+  assert.deepEqual(avisoHorario(['10:00-18:00'], 19 * 60), { tipo: 'cerrado', cierra: 18 * 60 });
+  assert.deepEqual(avisoHorario(['11:00-15:00', '18:00-23:00'], 16 * 60), { tipo: 'antes', abre: 18 * 60 });
+  assert.equal(avisoHorario(['18:00-02:00'], 22 * 60), null);
+  assert.equal(avisoHorario([], 12 * 60), null);
+}
+// Teselas para usar el mapa sin conexión: el recuadro con poco zoom y el entorno de cada punto con mucho.
+{
+  const t = teselasDe([{ lat: 50.087, lon: 14.421 }, { lat: 50.09, lon: 14.4 }]);
+  const de = (z) => t.filter(([zz]) => zz === z);
+  assert.ok(de(10).length >= 1 && de(16).length > de(14).length);
+  assert.ok(t.some(([z, x, y]) => z === 16 && x === 35393 && y === 22201), 'la tesela del centro de Praga');
+  assert.equal(new Set(t.map((x) => x.join('/'))).size, t.length);
+  assert.ok(t.length < 1500, String(t.length));
+  assert.deepEqual(teselasDe([]), []);
 }
