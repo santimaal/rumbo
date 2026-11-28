@@ -2,6 +2,14 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 20,
+    cosas: [
+      '🗑️ Los viajes borrados van a una papelera durante 7 días: desde la portada se pueden recuperar o borrar ya.',
+      '☁️ Un viaje compartido se borra de la nube cuando lo han borrado del todo todos los que lo tienen.',
+      'Si un viaje compartido ya no está en la nube, te queda como copia propia y te lo avisa.',
+    ],
+  },
+  {
     version: 19,
     cosas: [
       '😋 En «Para probar», la × para quitar un plato va dentro de su etiqueta.',

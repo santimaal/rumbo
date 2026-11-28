@@ -405,7 +405,8 @@ async function rpc(funcion, params) {
     signal: AbortSignal.timeout(15000),
   });
   if (!r.ok) throw new Error(`Supabase ${r.status}`);
-  return r.json();
+  // Las funciones que no devuelven nada responden 204 sin cuerpo.
+  return r.status === 204 ? null : r.json();
 }
 
 export const nube = {
@@ -413,6 +414,10 @@ export const nube = {
   leer: async (id) => (await rpc('leer_viaje', { p_id: id }))[0] ?? null,
   /** Devuelve la versión nueva, o null si alguien lo cambió desde `version`. */
   guardar: (id, datos, version) => rpc('guardar_viaje', { p_id: id, p_datos: datos, p_version: version }),
+  /** Apunta este móvil entre los que tienen el viaje. */
+  unirse: (id) => rpc('unirse_viaje', { p_id: id, p_dispositivo: DISPOSITIVO }),
+  /** Este móvil deja el viaje; si era el último que lo tenía, se borra de la nube. Devuelve true si se borró. */
+  dejar: (id) => rpc('dejar_viaje', { p_id: id, p_dispositivo: DISPOSITIVO }),
 };
 
 // Avisos al instante entre móviles con Supabase Realtime: un canal por viaje, por WebSocket y sin librerías.

@@ -113,7 +113,10 @@ async function subir(id) {
     // El otro móvil guardó antes: se juntan los cambios de los dos y se vuelve a guardar.
     if (version === null) {
       const actual = await nube.leer(v.nube.id);
-      if (!actual) return;
+      if (!actual) {
+        yaNoCompartido(v);
+        return;
+      }
       avisarDeOtro(v, aplicarRemoto(v, actual));
       version = await nube.guardar(v.nube.id, datosNube(v), actual.version);
       pintar();
@@ -137,11 +140,36 @@ async function subir(id) {
 async function bajar(id) {
   const v = viajes.find((x) => x.id === id);
   if (!v?.nube || subidas.has(id) || subiendo.has(id)) return;
-  const actual = await nube.leer(v.nube.id).catch(() => null);
-  if (!actual || actual.version <= v.nube.version || subiendo.has(id)) return;
+  let actual;
+  try {
+    actual = await nube.leer(v.nube.id);
+  } catch {
+    return;
+  }
+  if (actual === null) {
+    yaNoCompartido(v);
+    return;
+  }
+  if (actual.version <= v.nube.version || subiendo.has(id)) return;
   avisarDeOtro(v, aplicarRemoto(v, actual));
   guardar();
   if (!v.nube.pendiente) ponerEstado(v, 'al-dia');
+}
+
+/** El viaje ya no está en la nube (lo borraron todos los demás o llevaba un año sin usarse): queda como copia propia. */
+function yaNoCompartido(v) {
+  v.nube = null;
+  guardar();
+  avisar(`«${v.nombre}» ya no está compartido: lo borraron los demás. Tu copia sigue aquí.`);
+}
+
+// Cada móvil se apunta una vez por sesión en los viajes compartidos que tiene, para saber cuándo ya no lo tiene nadie.
+const apuntados = new Set();
+function apuntarme(v) {
+  if (!v.nube || apuntados.has(v.nube.id)) return;
+  const { id } = v.nube;
+  apuntados.add(id);
+  nube.unirse(id).catch(() => apuntados.delete(id));
 }
 
 const presentes = new Map();
@@ -178,6 +206,7 @@ function iniciarNube() {
     if (!v.nube.base && !v.nube.pendiente) v.nube.base = copiaNube(v);
     ponerEstado(v, v.nube.pendiente ? 'pendiente' : 'al-dia');
     escuchar(v);
+    apuntarme(v);
   }
   ponerAlDia();
   addEventListener('online', ponerAlDia);
@@ -320,6 +349,7 @@ function pintarInicio() {
       ? el('ul', { className: 'lista' }, ...viajes.map(filaViaje))
       : el('p', { textContent: 'Crea tu primer viaje: elige ciudad y te propongo qué ver.' }),
     boton('📥 Abrir enlace compartido', () => abrirEnlaceCompartido(), 'texto'),
+    papelera.length ? boton(`🗑️ Papelera (${papelera.length})`, abrirPapelera, 'texto') : '',
     el('div', { className: 'barra' }, el('div', { className: 'fila' }, boton('Nuevo viaje', () => editarViaje(), 'fuerte'))),
   );
   completarPaises();
@@ -1531,11 +1561,96 @@ async function zonaDe(v) {
   return v.zona;
 }
 
+// ===== Papelera: los viajes borrados se pueden recuperar durante una semana.
+const CLAVE_PAPELERA = 'rumbo-papelera';
+const DIAS_PAPELERA = 7;
+let papelera = (() => {
+  try {
+    const lista = (JSON.parse(localStorage.getItem(CLAVE_PAPELERA)) ?? []).filter((x) => x?.viaje && Number.isFinite(x.borrado));
+    const validos = validarViajes({ viajes: lista.map((x) => x.viaje) });
+    return validos.map((viaje, i) => ({ viaje, borrado: lista[i].borrado }));
+  } catch {
+    return [];
+  }
+})();
+function guardarPapelera() {
+  try {
+    localStorage.setItem(CLAVE_PAPELERA, JSON.stringify(papelera));
+  } catch { /* sin espacio: la papelera es lo menos importante */ }
+}
+
 function borrarViaje(v) {
-  if (!confirm(`¿Borrar «${v.nombre}» y sus lugares? No se puede deshacer.`)) return;
   viajes = viajes.filter((x) => x !== v);
+  papelera.unshift({ viaje: v, borrado: Date.now() });
+  guardarPapelera();
+  if (abierto === v.id) volver();
   guardar();
-  volver();
+  avisar(`«${v.nombre}» está en la papelera ${DIAS_PAPELERA} días.`, { texto: 'Deshacer', hacer: () => recuperar(v.id) });
+}
+
+function recuperar(id) {
+  const item = papelera.find((x) => x.viaje.id === id);
+  if (!item) return;
+  papelera = papelera.filter((x) => x !== item);
+  guardarPapelera();
+  const v = item.viaje;
+  viajes.unshift(v);
+  guardar();
+  if (v.nube) {
+    escuchar(v);
+    apuntarme(v);
+    if (v.nube.pendiente) subir(v.id);
+    else bajar(v.id);
+  }
+  avisar(`«${v.nombre}» recuperado.`);
+}
+
+/** Lo borra del todo; si es compartido, este móvil lo deja y, si era el último que lo tenía, se borra de la nube. */
+async function borrarDelTodo(item) {
+  if (item.viaje.nube) await nube.dejar(item.viaje.nube.id);
+  papelera = papelera.filter((x) => x !== item);
+  guardarPapelera();
+}
+
+/** Vacía lo que lleva más de una semana en la papelera. Sin conexión, los compartidos esperan a la próxima vez. */
+async function limpiarPapelera() {
+  const caducados = papelera.filter((x) => Date.now() - x.borrado > DIAS_PAPELERA * 864e5);
+  for (const item of caducados) await borrarDelTodo(item).catch(() => {});
+  if (caducados.length && !abierto) pintar();
+}
+
+function abrirPapelera() {
+  const quedan = (x) => {
+    const dias = Math.ceil((x.borrado + DIAS_PAPELERA * 864e5 - Date.now()) / 864e5);
+    return dias <= 1 ? 'se borra del todo mañana' : `se borra del todo en ${dias} días`;
+  };
+  const pintarLista = () => {
+    if (!papelera.length) {
+      $('dlg-papelera').close();
+      pintar();
+      return;
+    }
+    $('papelera-lista').replaceChildren(...papelera.map((x) => el('div', { className: 'en-papelera' },
+      el('div', {}, el('strong', { textContent: x.viaje.nombre }),
+        el('small', { textContent: `${x.viaje.destino} · ${quedan(x)}${x.viaje.nube ? ' · ☁️ compartido' : ''}` })),
+      el('div', { className: 'fila' },
+        boton('Recuperar', () => {
+          recuperar(x.viaje.id);
+          pintarLista();
+        }),
+        boton('Borrar ya', async () => {
+          const aviso = x.viaje.nube ? ' Si nadie más lo tiene, también se borra de la nube.' : '';
+          if (!confirm(`¿Borrar «${x.viaje.nombre}» para siempre? No se puede deshacer.${aviso}`)) return;
+          try {
+            await borrarDelTodo(x);
+          } catch {
+            avisar('No se pudo borrar de la nube: hace falta conexión.');
+          }
+          pintarLista();
+        }, 'texto peligro')))));
+  };
+  pintarLista();
+  $('dlg-papelera').showModal();
 }
 
 let ciudad = null;
@@ -2116,6 +2231,7 @@ async function enlaceCompartido(v) {
     ponerEstado(v, 'al-dia');
     persistir();
     escuchar(v);
+    apuntarme(v);
     pintar();
   }
   return `${location.origin}${location.pathname}#v=${v.nube.id}`;
@@ -2297,6 +2413,7 @@ async function recibirCompartido(codigo) {
   guardar();
   ir(v.id);
   escuchar(v);
+  apuntarme(v);
   avisar('Viaje compartido añadido.');
 }
 
@@ -2427,4 +2544,5 @@ recibirPublicacion();
 navigator.storage?.persist?.();
 vigilarVersiones();
 iniciarNube();
+limpiarPapelera();
 enseñarNovedades();

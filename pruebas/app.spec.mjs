@@ -333,6 +333,98 @@ test('con el teclado abierto no se enseña la barra de abajo', async ({ page }) 
   await expect(barra).toBeVisible();
 });
 
+test('los viajes borrados van a la papelera una semana y se pueden recuperar', async ({ page }) => {
+  await sinRed(page);
+  page.on('dialog', (d) => d.accept());
+  await sembrar(page, [viaje(), viaje({ id: 'lis', nombre: 'Lisboa', destino: 'Lisboa, Portugal', pais: 'PT' })]);
+  // Uno que lleva ocho días en la papelera se borra del todo al abrir la app.
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('papelera')) return;
+    localStorage.setItem('rumbo-papelera', JSON.stringify([{ viaje: { id: 'viejo', nombre: 'Oporto', destino: 'Oporto', dias: 2, lugares: [] }, borrado: Date.now() - 8 * 864e5 }]));
+    sessionStorage.setItem('papelera', '1');
+  });
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('rumbo-papelera')).length)).toBe(0);
+  await expect(page.getByRole('button', { name: /Papelera/ })).toHaveCount(0);
+
+  // Borrar desde dentro del viaje vuelve a la portada; «Deshacer» lo recupera al momento.
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Borrar viaje' }).click();
+  await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
+  await page.getByRole('button', { name: 'Deshacer' }).click();
+  await expect(page.getByText('Roma', { exact: true })).toBeVisible();
+
+  // Desde la papelera se recupera o se borra para siempre.
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Borrar viaje' }).click();
+  await page.getByRole('button', { name: '🗑️ Papelera (1)' }).click();
+  const hoja = page.getByRole('dialog', { name: /Papelera/ });
+  await expect(hoja).toContainText('Roma, Italia · se borra del todo en 7 días');
+  await hoja.getByRole('button', { name: 'Recuperar' }).click();
+  await expect(hoja).toBeHidden();
+  expect((await guardados(page)).map((v) => v.nombre).sort()).toEqual(['Lisboa', 'Roma']);
+  await page.getByText('Lisboa', { exact: true }).click();
+  await page.getByRole('button', { name: 'Borrar viaje' }).click();
+  await page.getByRole('button', { name: '🗑️ Papelera (1)' }).click();
+  await hoja.getByRole('button', { name: 'Borrar ya' }).click();
+  await expect(hoja).toBeHidden();
+  await expect(page.getByRole('button', { name: /Papelera/ })).toHaveCount(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('rumbo-papelera')))).toEqual([]);
+});
+
+test('un viaje compartido solo se borra de la nube cuando lo borran todos', async ({ browser }) => {
+  const falsa = nubeFalsa();
+  const [movilA, movilB] = await Promise.all([browser.newContext(), browser.newContext()]);
+  await falsa.instalar(movilA);
+  await falsa.instalar(movilB);
+  const a = await movilA.newPage();
+  const b = await movilB.newPage();
+  await sinRed(a, { nube: true });
+  await sinRed(b, { nube: true });
+  a.on('dialog', (d) => d.accept());
+  b.on('dialog', (d) => d.accept());
+  await a.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
+  await sembrar(a, [viaje()]);
+  await a.goto('/');
+  await a.getByText('Roma', { exact: true }).click();
+  await a.getByRole('button', { name: 'Compartir viaje' }).click();
+  await a.getByRole('button', { name: 'Enviar enlace' }).click();
+  await a.keyboard.press('Escape');
+  const url = await a.waitForFunction(() => window.compartido).then((h) => h.jsonValue());
+  await b.goto(url);
+  await expect(b.getByText(/☁️ compartido/)).toBeVisible();
+  await expect.poll(() => falsa.miembros.get('prueba0001')?.size).toBe(2);
+
+  // A lo borra del todo: B sigue teniéndolo, así que sigue en la nube.
+  await a.getByRole('button', { name: 'Borrar viaje' }).click();
+  await a.getByRole('button', { name: '🗑️ Papelera (1)' }).click();
+  await expect(a.getByRole('dialog', { name: /Papelera/ })).toContainText('☁️ compartido');
+  await a.getByRole('button', { name: 'Borrar ya' }).click();
+  await expect.poll(() => falsa.miembros.get('prueba0001')?.size).toBe(1);
+  expect(falsa.viajes.has('prueba0001')).toBe(true);
+
+  // B también: ya no lo tiene nadie y se borra de la nube.
+  await b.getByRole('button', { name: 'Borrar viaje' }).click();
+  await b.getByRole('button', { name: '🗑️ Papelera (1)' }).click();
+  await b.getByRole('button', { name: 'Borrar ya' }).click();
+  await expect.poll(() => falsa.viajes.has('prueba0001')).toBe(false);
+  await movilA.close();
+  await movilB.close();
+});
+
+test('si un viaje compartido ya no está en la nube, queda como copia propia', async ({ browser }) => {
+  const falsa = nubeFalsa();
+  const movil = await browser.newContext();
+  await falsa.instalar(movil);
+  const page = await movil.newPage();
+  await sinRed(page, { nube: true });
+  await sembrar(page, [viaje({ nube: { id: 'borrado00000001', version: 3, pendiente: false } })]);
+  await page.goto('/');
+  await expect(page.getByText('«Roma» ya no está compartido: lo borraron los demás. Tu copia sigue aquí.')).toBeVisible();
+  await expect.poll(async () => (await guardados(page))[0].nube).toBeNull();
+  await movil.close();
+});
+
 test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ page, browser }) => {
   await sinRed(page);
   await page.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
@@ -686,6 +778,7 @@ function nubeFalsa() {
   const viajes = new Map();
   const salas = new Map();
   const presencias = new Map();
+  const miembros = new Map();
   let n = 0;
   const instalar = async (contexto) => {
     await contexto.route('https://centngtgakviminnkkva.supabase.co/rest/v1/rpc/*', (route) => {
@@ -695,6 +788,15 @@ function nubeFalsa() {
         const id = `prueba${String(++n).padStart(4, '0')}`;
         viajes.set(id, { datos: p.p_datos, version: 1 });
         return route.fulfill({ json: id });
+      }
+      if (funcion === 'unirse_viaje') {
+        if (viajes.has(p.p_id)) miembros.set(p.p_id, new Set([...(miembros.get(p.p_id) ?? []), p.p_dispositivo]));
+        return route.fulfill({ status: 204, body: '' });
+      }
+      if (funcion === 'dejar_viaje') {
+        miembros.get(p.p_id)?.delete(p.p_dispositivo);
+        if (miembros.get(p.p_id)?.size) return route.fulfill({ json: false });
+        return route.fulfill({ json: viajes.delete(p.p_id) });
       }
       const v = viajes.get(p.p_id);
       if (funcion === 'leer_viaje') return route.fulfill({ json: v ? [structuredClone(v)] : [] });
@@ -734,7 +836,7 @@ function nubeFalsa() {
       ws.onClose(() => { for (const topic of claves.keys()) { salir(topic); salas.get(topic)?.delete(ws); } });
     });
   };
-  return { viajes, instalar };
+  return { viajes, miembros, instalar };
 }
 
 test('un viaje compartido se sincroniza solo entre dos móviles', async ({ browser }) => {
@@ -894,14 +996,14 @@ test('los lugares que el asistente no pudo situar los sitúa la app al abrir el 
 test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) => {
   await sinRed(page);
   await sembrar(page, [viaje()], { novedadesVistas: false });
-  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '18'); sessionStorage.setItem('vista', '1'); } });
+  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '19'); sessionStorage.setItem('vista', '1'); } });
   await page.goto('/');
   const ventana = page.getByRole('dialog', { name: /Novedades de Rumbo/ });
   await expect(ventana).toBeVisible();
   // Con una sola versión no hay título por versión, ni restos como «null».
-  await expect(ventana).toContainText('dentro de su etiqueta');
+  await expect(ventana).toContainText('papelera durante 7 días');
   await expect(ventana).not.toContainText('null');
-  await expect(ventana).not.toContainText('pellizcar');
+  await expect(ventana).not.toContainText('dentro de su etiqueta');
   await ventana.getByRole('button', { name: 'Entendido' }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
@@ -909,7 +1011,7 @@ test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) 
   // Desde Ajustes se pueden volver a ver.
   await page.getByRole('button', { name: 'Ajustes' }).click();
   await page.getByRole('button', { name: 'Ver novedades' }).click();
-  await expect(ventana).toContainText('descarga el mapa');
+  await expect(ventana).toContainText('pellizcar');
 });
 
 test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {
@@ -1014,6 +1116,8 @@ test('en la portada, deslizar un viaje a la izquierda deja borrarlo', async ({ p
   await page.getByRole('button', { name: 'Borrar «Lisboa»' }).click();
   await expect(page.locator('.fila-viaje', { hasText: 'Lisboa' })).toHaveCount(0);
   expect((await guardados(page)).map((v) => v.nombre)).toEqual(['Roma']);
+  await expect(page.getByText('«Lisboa» está en la papelera 7 días.')).toBeVisible();
+  await expect(page.getByRole('button', { name: '🗑️ Papelera (1)' })).toBeVisible();
   // Un toque normal sigue abriendo el viaje.
   await page.getByText('Roma', { exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Roma' })).toBeVisible();
