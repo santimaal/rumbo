@@ -3,9 +3,10 @@ import {
   enlaceSeguro, fotoDe, diasValidos, validarViajes, TIPOS_CONSEJO, coincide, tramosRuta, claveRuta, duracion, horarioDelDia, tiempoDe, bandera,
   empaquetar, desempaquetar, mismoViaje, actualizarViaje, CATEGORIAS, adivinarCategoria, mejorHueco,
   ordenarDias, estanciaDe, minutosTramo, hora, agenda, datosNube, fusionar, resumenCambios,
+  atardecer, salidaAeropuerto, monedaDe,
 } from './logica.js';
 import {
-  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, buscarHorarios, prevision, buscarComida, nube, escucharViaje, avisarCambio, estarEn,
+  IDIOMA, buscarCiudades, buscarLugar, buscarFoto, buscarIdeas, buscarVuelo, calcularLlegada, recomendar, estiloMapa, rutaReal, buscarHorarios, prevision, buscarComida, nube, escucharViaje, avisarCambio, estarEn, husoDe, cambiosDelEuro,
 } from './fuentes.js';
 import { NOVEDADES } from './novedades.js';
 
@@ -300,15 +301,71 @@ function pintarInicio() {
     el('div', { className: 'arriba' }, el('h1', { textContent: 'Rumbo' }), botonIcono('ajustes', 'Ajustes', abrirAjustes)),
     el('p', { className: 'tenue', textContent: 'Tus viajes, parada a parada.' }),
     viajes.length
-      ? el('ul', { className: 'lista' }, ...viajes.map((v) => el('li', {}, el('button', { type: 'button', className: 'viaje', onclick: () => ir(v.id) },
-        v.pais ? el('span', { className: 'bandera', ariaHidden: 'true', textContent: bandera(v.pais) }) : null,
-        el('span', { className: 'nombre' }, el('strong', { textContent: v.nombre }),
-          el('small', { textContent: `${v.destino} · ${plural(v.dias, 'día', 'días')} · ${plural(v.lugares.length, 'lugar', 'lugares')}` })),
-        el('span', { className: 'puntos', ariaHidden: 'true' }, ...Array.from({ length: Math.min(v.dias, 5) }, (_, i) => el('i', { color: color(i + 1) })))))))
+      ? el('ul', { className: 'lista' }, ...viajes.map(filaViaje))
       : el('p', { textContent: 'Crea tu primer viaje: elige ciudad y te propongo qué ver.' }),
+    boton('📥 Abrir enlace compartido', () => abrirEnlaceCompartido(), 'texto'),
     el('div', { className: 'barra' }, el('div', { className: 'fila' }, boton('Nuevo viaje', () => editarViaje(), 'fuerte'))),
   );
   completarPaises();
+}
+
+/** Viaje de la portada. Deslizándolo a la derecha aparece la papelera para borrarlo. */
+function filaViaje(v) {
+  const papelera = botonIcono('borrar', `Borrar «${v.nombre}»`, () => borrarViaje(v), 'borrar-viaje');
+  papelera.tabIndex = -1;
+  const delante = el('button', { type: 'button', className: 'viaje' },
+    v.pais ? el('span', { className: 'bandera', ariaHidden: 'true', textContent: bandera(v.pais) }) : null,
+    el('span', { className: 'nombre' }, el('strong', { textContent: v.nombre }),
+      el('small', { textContent: `${v.destino} · ${plural(v.dias, 'día', 'días')} · ${plural(v.lugares.length, 'lugar', 'lugares')}` })),
+    el('span', { className: 'puntos', ariaHidden: 'true' }, ...Array.from({ length: Math.min(v.dias, 5) }, (_, i) => el('i', { color: color(i + 1) }))));
+  const fila = el('li', { className: 'fila-viaje' }, papelera, delante);
+  const ANCHO = 84;
+  let inicio = null;
+  let dx = 0;
+  let horizontal = null;
+  let movido = false;
+  const abrir = (si) => {
+    fila.classList.toggle('deslizada', si);
+    delante.style.transform = si ? `translateX(${ANCHO}px)` : '';
+    papelera.tabIndex = si ? 0 : -1;
+  };
+  delante.addEventListener('pointerdown', (e) => {
+    if (e.button) return;
+    inicio = { x: e.clientX, y: e.clientY, abierta: fila.classList.contains('deslizada') };
+    horizontal = null;
+    movido = false;
+  });
+  delante.addEventListener('pointermove', (e) => {
+    if (!inicio) return;
+    const mx = e.clientX - inicio.x;
+    const my = e.clientY - inicio.y;
+    if (horizontal === null && Math.hypot(mx, my) > 8) {
+      horizontal = Math.abs(mx) > Math.abs(my);
+      if (horizontal) {
+        delante.setPointerCapture(e.pointerId);
+        fila.classList.add('moviendose');
+      }
+    }
+    if (!horizontal) return;
+    movido = true;
+    dx = Math.min(ANCHO + 40, Math.max(0, (inicio.abierta ? ANCHO : 0) + mx));
+    delante.style.transform = `translateX(${dx}px)`;
+  });
+  const soltar = () => {
+    if (!inicio) return;
+    inicio = null;
+    fila.classList.remove('moviendose');
+    if (horizontal) abrir(dx > ANCHO / 2);
+  };
+  delante.addEventListener('pointerup', soltar);
+  delante.addEventListener('pointercancel', soltar);
+  delante.onclick = () => {
+    // Tras deslizar no se abre el viaje; si estaba abierta la papelera, el toque la cierra.
+    if (movido) return;
+    if (fila.classList.contains('deslizada')) abrir(false);
+    else ir(v.id);
+  };
+  return fila;
 }
 
 // Los viajes creados antes de guardar el país lo buscan por su destino, una vez por sesión.
@@ -351,8 +408,12 @@ function pintarViaje(v) {
         el('span', { id: 'presentes', textContent: textoPresentes(presentes.get(v.id)) })] : [])),
     el('button', { type: 'button', className: 'abrir-consejos', onclick: () => ir(v.id, 'consejos') },
       el('span', { textContent: '📝 Notas y consejos' }),
-      el('small', { textContent: [v.nota ? 'nota' : '', v.consejos.length ? plural(v.consejos.length, 'consejo', 'consejos') : ''].filter(Boolean).join(' · ') || 'vacío' }),
+      el('small', { textContent: [
+        v.tareas.some((t) => !t.hecha) ? plural(v.tareas.filter((t) => !t.hecha).length, 'pendiente', 'pendientes') : '',
+        v.consejos.length ? plural(v.consejos.length, 'consejo', 'consejos') : '', v.nota ? 'nota' : '',
+      ].filter(Boolean).join(' · ') || 'vacío' }),
       el('span', { ariaHidden: 'true', textContent: '›' })),
+    botonCambio(v),
     filtrosCategoria(v),
     divMapa,
     v.lugares.length ? null : el('p', { textContent: 'Aún no hay lugares. Mira las ideas o pega el texto de una publicación.' }),
@@ -370,6 +431,8 @@ function pintarViaje(v) {
   completarHorarios(v);
   completarRutas(v);
   completarTiempo(v);
+  completarHuso(v);
+  completarCambio(v);
 }
 
 function puntosDelDia(v, dia, lugares) {
@@ -390,6 +453,28 @@ function fechaISO(v, dia) {
   return f.toISOString().slice(0, 10);
 }
 const diaSemana = (v, dia) => (v.fecha ? new Date(`${fechaISO(v, dia)}T12:00:00Z`).getUTCDay() : null);
+
+const husos = new Map();
+const claveZona = (z) => `${z.lat.toFixed(2)},${z.lon.toFixed(2)}`;
+
+/** Hora local de la puesta de sol del día, en la zona horaria del destino. */
+function textoAtardecer(v, dia) {
+  const huso = v.zona && husos.get(claveZona(v.zona));
+  if (!v.fecha || !huso) return '';
+  const puesta = atardecer(fechaISO(v, dia), v.zona.lat, v.zona.lon);
+  return puesta ? `🌅 ${puesta.toLocaleTimeString('es', { timeZone: huso, hour: '2-digit', minute: '2-digit' })}` : '';
+}
+
+async function completarHuso(v) {
+  if (!v.fecha || !v.zona || husos.has(claveZona(v.zona))) return;
+  husos.set(claveZona(v.zona), null);
+  try {
+    husos.set(claveZona(v.zona), await husoDe(v.zona));
+    if (abierto === v.id) pintar();
+  } catch {
+    husos.delete(claveZona(v.zona));
+  }
+}
 
 const tiempos = new Map();
 function textoTiempo(v, dia) {
@@ -516,7 +601,79 @@ function lineaVuelo(v, dia) {
     lineas.push(['Llegada', llegada && `${llegada}${estimada ? ' aprox.' : ''}`, numero, lugarAeropuerto(hasta)]);
   }
   if (dia === v.dias && v.vuelta) lineas.push(['Vuelo de vuelta', v.vuelta.salida, v.vuelta.numero, lugarAeropuerto(v.vuelta.desde)]);
-  return lineas.map((l) => el('p', { className: 'vuelo', textContent: `\u2708\uFE0E ${l.filter(Boolean).join(' · ')}` }));
+  return [
+    ...lineasHotel(v, dia),
+    ...lineas.map((l) => el('p', { className: 'vuelo', textContent: `\u2708\uFE0E ${l.filter(Boolean).join(' · ')}` })),
+    ...lineasSalida(v, dia),
+  ];
+}
+
+/** Cuándo salir hacia el aeropuerto el último día, y el aviso de la víspera si es de madrugada. */
+function lineasSalida(v, dia) {
+  const s = salidaAeropuerto(v);
+  if (!s) return [];
+  const cuando = `${s.desdeHotel ? 'Sal del hotel' : 'Sal hacia el aeropuerto'} sobre las ${hora(s.sale)}`;
+  const detalle = `para llegar 2 h antes del vuelo (trayecto de unos ${s.trayecto} min)`;
+  const lineas = [];
+  if (dia === v.dias && !s.anterior) lineas.push(`🚕 ${cuando}, ${detalle}.${s.madrugada ? ' A esa hora hay poco transporte: mejor taxi reservado.' : ''}`);
+  if (dia === v.dias - 1 && s.anterior) lineas.push(`🚕 Esta noche: ${cuando.toLowerCase()}, ${detalle}.`);
+  if (dia === v.dias - 1 && s.madrugada && !s.anterior) lineas.push(`🌙 Mañana sales sobre las ${hora(s.sale)}: deja la maleta lista y el taxi reservado.`);
+  return lineas.map((t) => el('p', { className: 'vuelo aviso-salida', textContent: t }));
+}
+
+/** Check-in el primer día en cada alojamiento y check-out el día que se deja. */
+function lineasHotel(v, dia) {
+  const hoteles = [...v.hoteles].sort((a, b) => a.desde - b.desde);
+  return hoteles.flatMap((h, i) => {
+    const deja = hoteles[i + 1]?.desde ?? v.dias;
+    return [
+      h.desde === dia && (h.checkin || h.notas) ? `🏨 ${h.nombre}${h.checkin ? `: check-in desde las ${h.checkin}` : ''}${h.notas ? ` · ${h.notas}` : ''}` : '',
+      deja === dia && h.checkout && (deja !== h.desde || v.dias === 1) ? `🏨 Check-out de ${h.nombre} hasta las ${h.checkout}` : '',
+    ].filter(Boolean).map((t) => el('p', { className: 'vuelo', textContent: t }));
+  });
+}
+
+let tasas = null;
+const nombreMoneda = (m) => {
+  try {
+    return new Intl.DisplayNames(['es'], { type: 'currency' }).of(m);
+  } catch {
+    return m;
+  }
+};
+const numero = (n, decimales = 2) => n.toLocaleString('es', { maximumFractionDigits: decimales });
+
+async function completarCambio(v) {
+  const moneda = monedaDe(v.pais);
+  if (!moneda || moneda === 'EUR' || tasas) return;
+  try {
+    tasas = await cambiosDelEuro();
+    if (abierto === v.id && tasas[moneda]) pintar();
+  } catch { /* sin conexión: el conversor lo explica al abrirlo */ }
+}
+
+/** Botón del conversor para los destinos que no usan euros, con el cambio del día a la vista. */
+function botonCambio(v) {
+  const moneda = monedaDe(v.pais);
+  if (!moneda || moneda === 'EUR') return null;
+  const tasa = tasas?.[moneda];
+  return el('button', { type: 'button', className: 'abrir-consejos', onclick: () => abrirCambio(moneda) },
+    el('span', { textContent: '💱 Conversor' }),
+    el('small', { textContent: tasa ? `1 € = ${numero(tasa)} ${moneda}` : nombreMoneda(moneda) }),
+    el('span', { ariaHidden: 'true', textContent: '›' }));
+}
+
+function abrirCambio(moneda) {
+  const tasa = tasas?.[moneda];
+  const f = $('form-cambio');
+  f.reset();
+  $('cambio-moneda').textContent = `${nombreMoneda(moneda)} (${moneda})`;
+  $('cambio-tasa').textContent = tasa ? `1 € = ${numero(tasa, 4)} ${moneda} · 100 ${moneda} = ${numero(100 / tasa)} €` : 'El conversor necesita conexión la primera vez para saber el cambio del día.';
+  f.elements.euros.disabled = !tasa;
+  f.elements.local.disabled = !tasa;
+  f.elements.euros.oninput = () => { f.elements.local.value = f.elements.euros.value ? Math.round(f.elements.euros.value * tasa * 100) / 100 : ''; };
+  f.elements.local.oninput = () => { f.elements.euros.value = f.elements.local.value ? Math.round((f.elements.local.value / tasa) * 100) / 100 : ''; };
+  $('dlg-cambio').showModal();
 }
 
 /** Botones para ver solo una categoría; aparecen cuando el viaje tiene lugares de más de una. */
@@ -560,11 +717,18 @@ function seccionDia(v, dia, lugares) {
   const trayectos = lugares.map((l, i) => llega[i + desplazar]?.min
     ?? (i ? minutosTramo(lugares[i - 1], l) : ends.inicio ? minutosTramo(ends.inicio, l) : 0));
   const plan = dia && lugares.length ? agenda(v, dia, lugares, trayectos) : null;
+  // El último día, lo que cae después de salir hacia el aeropuerto ya no se puede hacer.
+  const salida = dia === v.dias ? salidaAeropuerto(v) : null;
+  if (plan && salida && !salida.anterior) {
+    plan.comidas = plan.comidas.filter((c) => c.hora < salida.sale);
+    plan.horas.forEach((h) => { h.tarde = h.sale > salida.sale; });
+  }
   const resumen = [
     dia && fechaDelDia(v, dia),
     real ? textoRuta(real)
       : km ? `${km.toLocaleString('es', { maximumFractionDigits: 1 })} km en línea recta` : plural(lugares.length, 'lugar', 'lugares'),
     dia && textoTiempo(v, dia),
+    dia && textoAtardecer(v, dia),
     dia && !minutosUtiles(v)[dia - 1] ? 'sin tiempo libre por el vuelo' : '',
     plan ? `acabas sobre las ${hora(plan.horas.at(-1).sale)}` : '',
   ].filter(Boolean).join(' · ');
@@ -628,10 +792,50 @@ function pintarConsejos(v) {
     el('h2', { className: 'apartado', textContent: 'Nota del viaje' }),
     v.nota ? nota(v.nota, 'Nota del viaje', ponerNota)
       : boton('+ Escribir una nota', () => editarNota('Nota del viaje', '', ponerNota), 'texto'),
+    el('h2', { className: 'apartado', textContent: '✅ Pendientes' }),
+    seccionTareas(v),
+    el('h2', { className: 'apartado', textContent: '😋 Para probar' }),
+    seccionProbar(v),
     el('h2', { className: 'apartado', textContent: 'Consejos' }),
     seccionConsejos(v) ?? el('p', { className: 'tenue', textContent: 'Apunta dónde comer, dónde no comprar, cómo moverte… Se ordenan solos por tipo.' }),
     el('div', { className: 'barra' }, el('div', { className: 'fila' }, boton('+ Consejo', () => editarConsejo(v), 'fuerte'))),
   ].filter(Boolean));
+}
+
+/** Campo para añadir a una lista; tras añadir, el foco vuelve al campo para seguir escribiendo. */
+function campoNuevo(id, etiqueta, ejemplo, alAnadir) {
+  const campo = el('input', { id, type: 'text', placeholder: ejemplo, ariaLabel: etiqueta, maxLength: 300, enterKeyHint: 'done', autocomplete: 'off' });
+  const anadir = () => {
+    const texto = campo.value.trim();
+    if (!texto) return;
+    alAnadir(texto);
+    guardar();
+    $(id)?.focus();
+  };
+  campo.onkeydown = (e) => { if (e.key === 'Enter') anadir(); };
+  return el('div', { className: 'fila nueva' }, campo, boton('Añadir', anadir));
+}
+
+function seccionTareas(v) {
+  const lista = [...v.tareas].sort((a, b) => a.hecha - b.hecha);
+  return el('div', { className: 'tareas' },
+    ...lista.map((t) => el('div', { className: `tarea${t.hecha ? ' hecha' : ''}` },
+      el('label', {},
+        el('input', { type: 'checkbox', checked: t.hecha, onchange: (e) => { t.hecha = e.target.checked; guardar(); } }),
+        el('span', { textContent: t.texto })),
+      botonIcono('borrar', `Quitar «${t.texto}»`, () => { v.tareas = v.tareas.filter((x) => x !== t); guardar(); }, 'peligro'))),
+    campoNuevo('nuevo-pendiente', 'Nuevo pendiente', 'Reservar el barco, el taxi…', (texto) => v.tareas.push({ id: crypto.randomUUID(), texto, hecha: false })));
+}
+
+function seccionProbar(v) {
+  return el('div', { className: 'probar' },
+    el('div', { className: 'filtros' }, ...v.probar.map((p) => el('span', { className: 'plato' },
+      el('button', {
+        type: 'button', className: 'chip', ariaPressed: String(p.probado), textContent: `${p.probado ? '✓ ' : ''}${p.nombre}`,
+        title: p.probado ? 'Marcar como no probado' : 'Marcar como probado', onclick: () => { p.probado = !p.probado; guardar(); },
+      }),
+      el('button', { type: 'button', className: 'quitar-plato', textContent: '×', ariaLabel: `Quitar ${p.nombre}`, onclick: () => { v.probar = v.probar.filter((x) => x !== p); guardar(); } })))),
+    campoNuevo('nuevo-plato', 'Nuevo plato para probar', 'Svíčková, trdelník…', (nombre) => v.probar.push({ id: crypto.randomUUID(), nombre, probado: false })));
 }
 
 function seccionConsejos(v) {
@@ -709,8 +913,8 @@ const ESTANCIAS = Array.from({ length: 24 }, (_, i) => (i + 1) * 15);
 /** La hora de la parada; tocarla abre el selector de rueda del móvil para el tiempo que se está allí. */
 function botonHoras(l, horas) {
   const actual = estanciaDe(l);
-  return el('label', { className: 'horas', title: 'Cambiar el tiempo que estarás aquí' },
-    el('span', { textContent: `🕐 ${hora(horas.llega)}–${hora(horas.sale)} · ${duracion(actual)}` }),
+  return el('label', { className: `horas${horas.tarde ? ' tarde' : ''}`, title: horas.tarde ? 'Acaba después de salir hacia el aeropuerto' : 'Cambiar el tiempo que estarás aquí' },
+    el('span', { textContent: `${horas.tarde ? '⚠ Después de salir al aeropuerto · ' : '🕐 '}${hora(horas.llega)}–${hora(horas.sale)} · ${duracion(actual)}` }),
     el('select', {
       ariaLabel: `Tiempo en ${l.nombre}`,
       onchange: (e) => {
@@ -1373,7 +1577,13 @@ function pintarHoteles(v) {
     }, 'texto peligro');
     const desde = el('select', { ariaLabel: `Primer día en ${h.nombre}`, onchange: (e) => { h.desde = Number(e.target.value); } },
       ...Array.from({ length: v.dias }, (_, i) => el('option', { value: i + 1, textContent: `Desde el día ${i + 1}`, selected: h.desde === i + 1 })));
-    return el('div', { className: 'hotel-fila' }, el('strong', { textContent: h.nombre }), el('small', { textContent: h.direccion }), el('div', { className: 'fila' }, desde, quitar));
+    const horaHotel = (campo, texto) => el('label', {}, texto,
+      el('input', { type: 'time', value: h[campo] ?? '', onchange: (e) => { h[campo] = e.target.value; } }));
+    return el('div', { className: 'hotel-fila' }, el('strong', { textContent: h.nombre }), el('small', { textContent: h.direccion }),
+      el('div', { className: 'dos' }, horaHotel('checkin', `Check-in en ${h.nombre} desde`), horaHotel('checkout', 'Check-out hasta')),
+      el('label', {}, 'Notas del alojamiento',
+        el('input', { value: h.notas ?? '', maxLength: 500, placeholder: 'Recepción 24 h, consigna de equipaje…', onchange: (e) => { h.notas = e.target.value.trim(); } })),
+      el('div', { className: 'fila' }, desde, quitar));
   }));
 }
 
@@ -1528,7 +1738,7 @@ $('form-lugares').onsubmit = (e) => {
 };
 document.querySelectorAll('[data-cerrar]').forEach((b) => { b.onclick = () => b.closest('dialog').close(); });
 // Las hojas en las que solo se elige algo se cierran tocando fuera, como en el resto de apps.
-for (const id of ['dlg-elegir', 'dlg-ajustes', 'dlg-comer', 'dlg-compartir', 'dlg-novedades']) {
+for (const id of ['dlg-elegir', 'dlg-ajustes', 'dlg-comer', 'dlg-compartir', 'dlg-novedades', 'dlg-cambio', 'dlg-enlace']) {
   $(id).addEventListener('click', (e) => {
     if (e.target !== e.currentTarget) return;
     const r = e.currentTarget.getBoundingClientRect();
@@ -1732,13 +1942,39 @@ async function compartirViaje(v) {
 }
 
 // El viaje va tras # para que nunca llegue al servidor.
-async function recibirViaje() {
-  const [, codigo] = /^#v=([a-z0-9]{8,40})$/.exec(location.hash) ?? [];
+const instalada = () => navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+const esMovil = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+/**
+ * En el móvil los enlaces se abren en el navegador, que guarda sus viajes aparte de la app instalada
+ * (en iPhone no hay forma de que un enlace abra la app). Se pregunta dónde se quiere el viaje.
+ */
+async function aquiOEnLaApp(hash) {
+  if (instalada() || !esMovil()) return true;
+  history.replaceState(null, '', location.pathname);
+  const donde = await preguntar('¿Dónde quieres este viaje?', [
+    { texto: '📲 En la app Rumbo instalada', detalle: 'Copio el enlace y lo pegas en la app con «Abrir enlace compartido»', valor: 'app' },
+    { texto: '🌐 Aquí, en el navegador', detalle: 'Si no tienes la app instalada', valor: 'aqui' },
+  ]);
+  if (donde !== 'app') return donde === 'aqui';
+  const url = `${location.origin}${location.pathname}${hash}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    avisar('Enlace copiado. Abre Rumbo desde tu pantalla de inicio y pulsa «📥 Abrir enlace compartido».');
+  } catch {
+    abrirEnlaceCompartido(url);
+  }
+  return false;
+}
+
+async function recibirViaje(hash = location.hash) {
+  if (!/^#(v|viaje)=/.test(hash) || !(await aquiOEnLaApp(hash))) return;
+  const [, codigo] = /^#v=([a-z0-9]{8,40})$/.exec(hash) ?? [];
   if (codigo) {
     recibirCompartido(codigo);
     return;
   }
-  const [, paquete] = /^#viaje=([\w-]+)$/.exec(location.hash) ?? [];
+  const [, paquete] = /^#viaje=([\w-]+)$/.exec(hash) ?? [];
   if (!paquete) return;
   history.replaceState(null, '', location.pathname);
   try {
@@ -1764,6 +2000,28 @@ async function recibirViaje() {
 }
 
 /** Abre un viaje compartido por enlace corto: si ya está guardado lo pone al día, si no lo añade. */
+/** Hoja para pegar un enlace de viaje en la app instalada (o para copiarlo si el navegador no deja). */
+function abrirEnlaceCompartido(sugerido = '') {
+  const f = $('form-enlace');
+  f.reset();
+  f.elements.enlace.value = sugerido;
+  $('pegar-enlace').hidden = !navigator.clipboard?.readText || Boolean(sugerido);
+  $('pegar-enlace').onclick = async () => {
+    try {
+      f.elements.enlace.value = (await navigator.clipboard.readText()).trim();
+    } catch {
+      avisar('No se pudo leer lo copiado. Mantén pulsado el campo y elige Pegar.');
+    }
+  };
+  f.onsubmit = () => {
+    const texto = f.elements.enlace.value.trim();
+    const hash = /#(v|viaje)=[\w-]+/.exec(texto)?.[0] ?? (/^[a-z0-9]{16}$/.test(texto) ? `#v=${texto}` : '');
+    if (hash) recibirViaje(hash);
+    else avisar('Eso no parece un enlace de viaje de Rumbo.');
+  };
+  $('dlg-enlace').showModal();
+}
+
 async function recibirCompartido(codigo) {
   history.replaceState(null, '', location.pathname);
   const mio = viajes.find((x) => x.nube?.id === codigo);
@@ -1885,7 +2143,7 @@ ponerTema(document.documentElement.dataset.tema);
 gestoAtras();
 recibirViaje();
 // Si Rumbo ya estaba abierto, un enlace nuevo solo cambia lo que va tras # y no recarga la página.
-addEventListener('hashchange', recibirViaje);
+addEventListener('hashchange', () => recibirViaje());
 recibirPublicacion();
 navigator.storage?.persist?.();
 vigilarVersiones();

@@ -496,6 +496,13 @@ function consejosValidos(consejos) {
   }));
 }
 
+/** Lista de cosas con texto y casilla (pendientes, platos para probar). */
+function listaValida(lista, campo, marca) {
+  return (Array.isArray(lista) ? lista : []).filter((x) => texto(x?.[campo]).trim()).slice(0, 200).map((x) => ({
+    id: texto(x.id) || crypto.randomUUID(), [campo]: texto(x[campo], 300).trim(), [marca]: x[marca] === true,
+  }));
+}
+
 /** Valida datos de una copia o del almacenamiento; lanza un error si no son de Rumbo. */
 export function validarViajes(datos) {
   if (!Array.isArray(datos?.viajes)) throw new Error('El archivo no es una copia de Rumbo.');
@@ -516,6 +523,7 @@ export function validarViajes(datos) {
       hoteles: (Array.isArray(v.hoteles) ? v.hoteles : []).filter(coordenadas).map((h) => ({
         nombre: texto(h.nombre) || 'Hotel', direccion: texto(h.direccion, 300), lat: h.lat, lon: h.lon,
         desde: Number.isInteger(h.desde) ? Math.min(dias, Math.max(1, h.desde)) : 1,
+        checkin: horaValida(h.checkin), checkout: horaValida(h.checkout), notas: texto(h.notas, 500),
       })),
       nota: texto(v.nota, NOTA),
       notasDia: notasValidas(v.notasDia),
@@ -536,6 +544,9 @@ export function validarViajes(datos) {
         estancia: Number.isInteger(l.estancia) && l.estancia >= 5 && l.estancia <= 600 ? l.estancia : 0,
       })),
       consejos: consejosValidos(v.consejos),
+      // Cosas por hacer antes o durante el viaje, y platos que se quieren probar.
+      tareas: listaValida(v.tareas, 'texto', 'hecha'),
+      probar: listaValida(v.probar, 'nombre', 'probado'),
       // Días que no se muestran; por defecto se ven todos.
       ocultos: [...new Set(Array.isArray(v.ocultos) ? v.ocultos : [])].filter((d) => Number.isInteger(d) && d >= 0 && d <= dias),
       lugares: v.lugares.map((l) => {
@@ -633,6 +644,8 @@ export function fusionar(base, mia, suya) {
     notasDia: fusionarCampos(base.notasDia, mia.notasDia, suya.notasDia),
     lugares: fusionarLista(base.lugares, mia.lugares, suya.lugares),
     consejos: fusionarLista(base.consejos, mia.consejos, suya.consejos),
+    tareas: fusionarLista(base.tareas, mia.tareas, suya.tareas),
+    probar: fusionarLista(base.probar, mia.probar, suya.probar),
   };
 }
 
@@ -653,3 +666,46 @@ export function resumenCambios(antes, despues) {
   if (!partes.length) return 'ha cambiado el viaje';
   return partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(', ')} y ${partes.at(-1)}`;
 }
+
+const rad = Math.PI / 180;
+/**
+ * Momento de la puesta de sol de un día en un sitio (fórmula de la NOAA simplificada, con un minuto o dos de error).
+ * Devuelve null en los días sin puesta (noche o día polar).
+ */
+export function atardecer(fechaISO, lat, lon) {
+  const n = Math.round((Date.parse(`${fechaISO}T12:00:00Z`) - Date.UTC(2000, 0, 1, 12)) / 864e5);
+  const j = n - lon / 360;
+  const m = (357.5291 + 0.98560028 * j) % 360;
+  const centro = 1.9148 * Math.sin(m * rad) + 0.02 * Math.sin(2 * m * rad) + 0.0003 * Math.sin(3 * m * rad);
+  const eclip = (m + centro + 180 + 102.9372) % 360;
+  const transito = 2451545 + j + 0.0053 * Math.sin(m * rad) - 0.0069 * Math.sin(2 * eclip * rad);
+  const decl = Math.asin(Math.sin(eclip * rad) * Math.sin(23.44 * rad));
+  const cosH = (Math.sin(-0.833 * rad) - Math.sin(lat * rad) * Math.sin(decl)) / (Math.cos(lat * rad) * Math.cos(decl));
+  if (Math.abs(cosH) > 1) return null;
+  return new Date((transito + Math.acos(cosH) / rad / 360 - 2440587.5) * 864e5);
+}
+
+const ANTES_DEL_VUELO = 120;
+/**
+ * A qué hora salir hacia el aeropuerto el último día: dos horas antes del vuelo, más el trayecto desde el hotel
+ * (en coche, o 45 minutos si no se sabe dónde están) y diez de margen. `anterior` si toca salir la víspera.
+ */
+export function salidaAeropuerto(v) {
+  const vuelo = minutos(v.vuelta?.salida);
+  if (vuelo === null) return null;
+  const hotel = extremosDelDia(v, v.dias).inicio;
+  const aeropuerto = v.vuelta.desde;
+  const trayecto = Math.round(hotel && aeropuerto && !hotel.iata ? minutosTramo(hotel, aeropuerto) : 45);
+  const sale = Math.floor((vuelo - ANTES_DEL_VUELO - trayecto - 10) / 5) * 5;
+  return { sale: (sale + 1440) % 1440, anterior: sale < 0, trayecto, madrugada: sale < 7 * 60, desdeHotel: Boolean(hotel && !hotel.iata) };
+}
+
+// Moneda de cada país, para el conversor. Los que no estén se quedan sin él.
+const EURO = 'AT BE CY DE EE ES FI FR GR HR IE IT LT LU LV MT NL PT SI SK AD MC SM VA ME XK'.split(' ');
+const MONEDAS = {
+  CZ: 'CZK', GB: 'GBP', US: 'USD', CH: 'CHF', HU: 'HUF', PL: 'PLN', DK: 'DKK', SE: 'SEK', NO: 'NOK', IS: 'ISK', RO: 'RON',
+  BG: 'BGN', RS: 'RSD', BA: 'BAM', AL: 'ALL', MK: 'MKD', TR: 'TRY', MA: 'MAD', TN: 'TND', EG: 'EGP', JP: 'JPY', CN: 'CNY',
+  KR: 'KRW', TH: 'THB', VN: 'VND', ID: 'IDR', IN: 'INR', AE: 'AED', MX: 'MXN', AR: 'ARS', BR: 'BRL', CL: 'CLP', CO: 'COP',
+  PE: 'PEN', CA: 'CAD', AU: 'AUD', NZ: 'NZD', ZA: 'ZAR', IL: 'ILS', JO: 'JOD', GE: 'GEL', AM: 'AMD', CU: 'CUP', DO: 'DOP',
+};
+export const monedaDe = (pais) => (EURO.includes(pais) ? 'EUR' : MONEDAS[pais] ?? '');

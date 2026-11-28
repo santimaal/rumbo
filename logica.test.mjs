@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje, adivinarCategoria, mejorHueco, ordenarDias, agenda, hora, minutosTramo, datosNube, fusionar, resumenCambios } from './logica.js';
+import { extraerLugares, parecido, organizar, ordenarRuta, largo, extremosDelDia, minutosUtiles, estimarLlegada, enlacesRuta, validarViajes, distanciaKm, diasValidos, coincide, tramosRuta, fotoDe, enlaceLugar, horarioDelDia, decodificarPolilinea, claveRuta, duracion, tiempoDe, bandera, empaquetar, desempaquetar, mismoViaje, actualizarViaje, adivinarCategoria, mejorHueco, ordenarDias, agenda, hora, minutosTramo, datosNube, fusionar, resumenCambios, atardecer, salidaAeropuerto, monedaDe } from './logica.js';
 
 assert.deepEqual(
   extraerLugares('Lo mejor de Roma 😍\n📍 Trattoria Da Enzo - la mejor pasta\n📍Panteón 📍 Coliseo (reserva!)\n#roma #viajes'),
@@ -253,3 +253,37 @@ assert.equal(resumenCambios(comun, { ...comun, nombre: 'Otro' }), 'ha cambiado e
 
 // Un viaje grande del asistente no pierde lugares por situar (antes se cortaba en 40).
 assert.equal(validarViajes({ viajes: [{ lugares: [], porSituar: Array.from({ length: 41 }, (_, i) => ({ nombre: `Sitio ${i}` })) }] })[0].porSituar.length, 41);
+
+// Atardecer: en Praga el 10 de diciembre el sol se pone hacia las 15:58 (14:58 UTC); en Madrid el 21 de junio, hacia las 21:48 (19:48 UTC).
+const enMinutosUTC = (d) => d.getUTCHours() * 60 + d.getUTCMinutes();
+assert.ok(Math.abs(enMinutosUTC(atardecer('2026-12-10', 50.0875, 14.4213)) - (14 * 60 + 58)) <= 4);
+assert.ok(Math.abs(enMinutosUTC(atardecer('2026-06-21', 40.4168, -3.7038)) - (19 * 60 + 48)) <= 4);
+assert.equal(atardecer('2026-12-21', 78.2, 15.6), null);
+
+// Salida al aeropuerto: vuelo a las 6:40, hotel a unos 12 km → hacia las 4:00, de madrugada.
+const conVuelo = {
+  dias: 5, hoteles: [{ lat: 50.0905, lon: 14.4290, desde: 1 }],
+  vuelta: { salida: '06:40', desde: { iata: 'PRG', lat: 50.1008, lon: 14.26 } },
+};
+const salida = salidaAeropuerto(conVuelo);
+assert.ok(salida.sale >= 3 * 60 + 50 && salida.sale <= 4 * 60 + 10, `sale ${salida.sale}`);
+assert.equal(salida.madrugada, true);
+assert.equal(salida.desdeHotel, true);
+assert.equal(salidaAeropuerto({ dias: 2, hoteles: [], vuelta: { salida: '01:00' } }).anterior, true);
+assert.equal(salidaAeropuerto({ dias: 2, hoteles: [], vuelta: null }), null);
+
+assert.equal(monedaDe('CZ'), 'CZK');
+assert.equal(monedaDe('ES'), 'EUR');
+assert.equal(monedaDe('XX'), '');
+
+// Pendientes, platos y datos del hotel se guardan y se juntan como el resto.
+const conListas = validarViajes({ viajes: [{ dias: 2, lugares: [], tareas: [{ texto: 'Reservar barco' }, { texto: ' ' }], probar: [{ nombre: 'Svíčková', probado: true }],
+  hoteles: [{ nombre: 'Bílá Labuť', lat: 50.09, lon: 14.43, checkin: '14:00', checkout: '12:00', notas: 'Consigna' }] }] })[0];
+assert.deepEqual(conListas.tareas.map((t) => [t.texto, t.hecha]), [['Reservar barco', false]]);
+assert.equal(conListas.probar[0].probado, true);
+assert.deepEqual([conListas.hoteles[0].checkin, conListas.hoteles[0].checkout, conListas.hoteles[0].notas], ['14:00', '12:00', 'Consigna']);
+{
+  const t1 = { id: 't1', texto: 'Reservar barco', hecha: false };
+  const juntas = fusionar({ tareas: [t1], probar: [] }, { tareas: [{ ...t1, hecha: true }], probar: [] }, { tareas: [t1, { id: 't2', texto: 'Taxi', hecha: false }], probar: [] });
+  assert.deepEqual(juntas.tareas.map((t) => `${t.texto}:${t.hecha}`), ['Reservar barco:true', 'Taxi:false']);
+}

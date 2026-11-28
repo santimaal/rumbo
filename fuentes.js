@@ -410,3 +410,37 @@ export function estarEn(id, nombre) {
 }
 
 export const avisarCambio = (id) => enviar(`realtime:viaje-${id}`, 'broadcast', { type: 'broadcast', event: 'cambio', payload: {} });
+
+/** Zona horaria de un sitio (Europe/Prague…), guardada para no volver a preguntarla. */
+export async function husoDe(zona) {
+  const clave = `${zona.lat.toFixed(2)},${zona.lon.toFixed(2)}`;
+  let guardados = {};
+  try {
+    guardados = JSON.parse(localStorage.getItem('rumbo-husos')) ?? {};
+  } catch { /* se vuelve a preguntar */ }
+  if (guardados[clave]) return guardados[clave];
+  const { timezone } = await pedir('https://api.open-meteo.com/v1/forecast', { latitude: zona.lat, longitude: zona.lon, timezone: 'auto', forecast_days: 1 }, 200);
+  guardados[clave] = timezone;
+  try {
+    localStorage.setItem('rumbo-husos', JSON.stringify(guardados));
+  } catch { /* sin espacio: se pregunta otra vez la próxima */ }
+  return timezone;
+}
+
+/** Cuánto vale un euro en cada moneda, de ExchangeRate-API; se pide una vez al día y se guarda para usarlo sin conexión. */
+export async function cambiosDelEuro() {
+  const hoy = new Date().toISOString().slice(0, 10);
+  let guardado = null;
+  try {
+    guardado = JSON.parse(localStorage.getItem('rumbo-cambio'));
+  } catch { /* se pide de nuevo */ }
+  if (guardado?.dia === hoy) return guardado.tasas;
+  try {
+    const { rates } = await pedir('https://open.er-api.com/v6/latest/EUR', {}, 0);
+    localStorage.setItem('rumbo-cambio', JSON.stringify({ dia: hoy, tasas: rates }));
+    return rates;
+  } catch (e) {
+    if (guardado) return guardado.tasas;
+    throw e;
+  }
+}

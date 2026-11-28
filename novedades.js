@@ -2,6 +2,18 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 12,
+    cosas: [
+      '🚕 El último día te dice a qué hora salir hacia el aeropuerto, y la víspera te avisa si es de madrugada.',
+      '🌅 Cada día enseña la hora del atardecer.',
+      '✅ Pendientes y 😋 platos para probar, compartidos, en Notas y consejos.',
+      '💱 Conversor de moneda con el cambio del día en los destinos sin euro.',
+      '🏨 Check-in, check-out y notas del alojamiento, en Vuelos y hotel.',
+      '👉 En la portada, desliza un viaje a la derecha para borrarlo.',
+      '📥 Si un enlace de viaje se te abre en el navegador, puedes llevarlo a la app con «Abrir enlace compartido».',
+    ],
+  },
+  {
     version: 11,
     cosas: [
       'Los viajes compartidos juntan los cambios de los dos: si cada uno toca una cosa a la vez, se quedan ambas.',

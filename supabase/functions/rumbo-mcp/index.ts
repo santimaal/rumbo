@@ -141,6 +141,11 @@ const prepararConsejos = (pedidos = []) => pedidos.slice(0, 40).filter((c) => St
   enlace: /^https?:\/\/\S+$/i.test(c.enlace ?? '') ? c.enlace : '',
 }));
 
+// Pendientes y platos para probar: solo texto y su casilla, que se marca luego en la app.
+const prepararLista = (pedidos = [], campo, marca) => (Array.isArray(pedidos) ? pedidos : []).slice(0, 60)
+  .map((x) => String(typeof x === 'string' ? x : x?.[campo] ?? '').trim()).filter(Boolean)
+  .map((t) => ({ id: crypto.randomUUID(), [campo]: t.slice(0, 300), [marca]: false }));
+
 const nombreCategoria = (id) => CATEGORIAS.find((c) => c.id === id)?.nombre ?? 'Otros';
 
 /** El viaje en texto, día a día, para que el asistente pueda contarlo o seguir trabajando con él. */
@@ -156,6 +161,8 @@ function describir(v, codigo) {
     lineas.push('', 'Consejos:');
     for (const c of v.consejos) lineas.push(`- [${TIPOS_CONSEJO.find((t) => t.id === c.tipo)?.nombre ?? 'Otros'}] ${c.texto}`);
   }
+  if (v.tareas?.length) lineas.push('', 'Pendientes:', ...v.tareas.map((t) => `- [${t.hecha ? 'x' : ' '}] ${t.texto}`));
+  if (v.probar?.length) lineas.push('', `Para probar: ${v.probar.map((p) => `${p.nombre}${p.probado ? ' ✓' : ''}`).join(', ')}`);
   if (v.porSituar?.length) {
     lineas.push('', 'Por situar en el mapa (la app los sitúa al abrir el viaje):');
     for (const l of v.porSituar) lineas.push(`- ${l.nombre}${l.dia ? ` (día ${l.dia})` : ''}`);
@@ -193,6 +200,7 @@ const ACCIONES = {
       nombre: String(a.nombre ?? '').trim() || sitio.destino.split(',')[0], ...sitio, dias,
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(a.fecha ?? '') ? a.fecha : '',
       lugares, hoteles, porSituar, consejos: prepararConsejos(a.consejos), nota: String(a.nota ?? ''), editadoPor: AUTOR,
+      tareas: prepararLista(a.pendientes, 'texto', 'hecha'), probar: prepararLista(a.para_probar, 'nombre', 'probado'),
     }] });
     // Sin días puestos, se reparten como lo hace Organizar en la app: por cercanía y con los hoteles.
     if (v.lugares.length && v.lugares.every((l) => !l.dia)) v = { ...v, lugares: organizar(v) };
@@ -217,16 +225,21 @@ const ACCIONES = {
     // Se buscan una vez; si alguien guarda a la vez, se vuelven a poner sobre su versión.
     const { lugares, perdidos, porSituar } = await prepararLugares(a.lugares, v);
     const consejos = prepararConsejos(a.consejos);
+    const tareas = prepararLista(a.pendientes, 'texto', 'hecha');
+    const probar = prepararLista(a.para_probar, 'nombre', 'probado');
     for (let intento = 0; intento < 3; intento++) {
       const nuevo = {
         ...v, lugares: [...v.lugares, ...lugares], porSituar: [...v.porSituar, ...porSituar], consejos: [...v.consejos, ...consejos],
+        tareas: [...v.tareas, ...tareas], probar: [...v.probar, ...probar],
         nota: a.nota ? [v.nota, String(a.nota)].filter(Boolean).join('\n\n') : v.nota, editadoPor: AUTOR,
       };
       const guardada = await rpc('guardar_viaje', { p_id: codigo, p_datos: datosNube(nuevo), p_version: version });
       if (guardada !== null) {
         await avisarMoviles(codigo);
         return [
-          `Añadido a «${v.nombre}»: ${cuantos(lugares.length + porSituar.length, 'lugar', 'lugares')} y ${cuantos(consejos.length, 'consejo', 'consejos')}${a.nota ? ', y la nota' : ''}.`,
+          `Añadido a «${v.nombre}»: ${[cuantos(lugares.length + porSituar.length, 'lugar', 'lugares'), cuantos(consejos.length, 'consejo', 'consejos'),
+            tareas.length ? cuantos(tareas.length, 'pendiente', 'pendientes') : '', probar.length ? cuantos(probar.length, 'plato para probar', 'platos para probar') : '',
+            a.nota ? 'la nota' : ''].filter(Boolean).join(', ')}.`,
           lugares.some((l) => !l.dia) ? 'Los lugares sin día quedan en «Sin día»: en la app, Organizar los reparte.' : '',
           perdidos.length ? `No encontré en el mapa: ${perdidos.join(', ')}.` : '',
           '', describir(nuevo, codigo),
@@ -258,6 +271,9 @@ const consejoEsquema = {
   },
   required: ['texto'],
 };
+const listaEsquema = (descripcion) => ({ type: 'array', items: { type: 'string' }, maxItems: 60, description: descripcion });
+const pendientesEsquema = listaEsquema('Cosas por hacer, que se tachan en la app: "Reservar el barco", "Reservar taxi al aeropuerto".');
+const probarEsquema = listaEsquema('Platos o bebidas típicos para probar, que se marcan en la app al probarlos.');
 const enlaceEsquema = { type: 'string', description: 'Enlace del viaje compartido (…/rumbo/#v=código) o solo el código.' };
 
 const HERRAMIENTAS = [
@@ -274,6 +290,8 @@ const HERRAMIENTAS = [
         hotel: { type: 'string', description: 'Opcional: alojamiento, para empezar y acabar ahí cada día.' },
         lugares: { type: 'array', items: lugarEsquema, maxItems: 40 },
         consejos: { type: 'array', items: consejoEsquema, maxItems: 40 },
+        pendientes: pendientesEsquema,
+        para_probar: probarEsquema,
         nota: { type: 'string', description: 'Nota general del viaje.' },
       },
       required: ['destino', 'dias'],
@@ -286,13 +304,15 @@ const HERRAMIENTAS = [
   },
   {
     name: 'anadir_al_viaje',
-    description: 'Añade lugares, consejos o una nota a un viaje compartido de Rumbo. Los móviles que lo tengan abierto lo ven al momento.',
+    description: 'Añade lugares, consejos, pendientes, platos para probar o una nota a un viaje compartido de Rumbo. Los móviles que lo tengan abierto lo ven al momento.',
     inputSchema: {
       type: 'object',
       properties: {
         enlace: enlaceEsquema,
         lugares: { type: 'array', items: lugarEsquema, maxItems: 40 },
         consejos: { type: 'array', items: consejoEsquema, maxItems: 40 },
+        pendientes: pendientesEsquema,
+        para_probar: probarEsquema,
         nota: { type: 'string', description: 'Texto que se añade a la nota general del viaje.' },
       },
       required: ['enlace'],

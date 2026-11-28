@@ -1,0 +1,2 @@
+# Copia exacta de la librería del QR: su huella de seguridad depende de cada byte.
+pruebas/qrcode-1.4.4.js -text

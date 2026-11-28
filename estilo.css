@@ -124,6 +124,23 @@ button:disabled { opacity: .45; cursor: default; }
 .enlace-compartir { font-size: 13px; color: var(--tenue); overflow-wrap: anywhere; text-align: center; max-height: 4.5em; overflow: hidden; }
 .novedades h3 { font-size: 16px; margin: 8px 0 0; color: var(--tenue); }
 .novedades ul { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+/* Portada: el viaje se desliza a la derecha y deja ver la papelera de debajo. */
+.fila-viaje { position: relative; }
+.fila-viaje .viaje { position: relative; z-index: 1; transition: transform .2s ease-out; touch-action: pan-y; }
+.fila-viaje.moviendose .viaje { transition: none; }
+.borrar-viaje.icono { position: absolute; inset: 0 auto 0 0; width: 84px; height: auto; border-radius: 18px; background: var(--error); color: #fff; }
+.tareas { display: grid; gap: 2px; }
+.tarea { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--raya); }
+.tarea label { flex: 1; display: flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 400; cursor: pointer; }
+.tarea input { width: 22px; height: 22px; accent-color: var(--marca); flex: none; }
+.tarea.hecha span { text-decoration: line-through; color: var(--tenue); }
+.nueva { margin-top: 8px; flex-wrap: nowrap; }
+.nueva input { flex: 1; min-width: 0; }
+.plato { display: inline-flex; align-items: center; }
+.plato .chip[aria-pressed="true"] { background: #2f7d3b; color: #fff; border-color: transparent; }
+.quitar-plato { min-height: 36px; width: 28px; padding: 0; border: 0; background: none; color: var(--tenue); font-size: 18px; }
+.aviso-salida { color: var(--marca); }
+.horas.tarde { color: var(--error); border-color: var(--error); }
 .consejos { margin: 0; }
 .apartado { margin: 24px 0 8px; }
 .abrir-consejos { width: 100%; margin-top: 12px; justify-content: flex-start; gap: 10px; border-radius: 14px; text-align: left; }

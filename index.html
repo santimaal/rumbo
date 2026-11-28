@@ -136,6 +136,26 @@
   </form>
 </dialog>
 
+<dialog id="dlg-cambio" aria-labelledby="cambio-titulo">
+  <form method="dialog" id="form-cambio">
+    <h2 id="cambio-titulo" tabindex="-1" autofocus>💱 Conversor</h2>
+    <p class="tenue" id="cambio-tasa"></p>
+    <label>Euros (€) <input name="euros" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></label>
+    <label><span id="cambio-moneda"></span> <input name="local" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></label>
+    <p><small>Cambio del día de <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener noreferrer">ExchangeRate-API</a>. Tu banco puede aplicar otro.</small></p>
+    <div class="fila"><button class="fuerte">Listo</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-enlace" aria-labelledby="enlace-titulo">
+  <form method="dialog" id="form-enlace">
+    <h2 id="enlace-titulo" tabindex="-1" autofocus>📥 Abrir enlace compartido</h2>
+    <p class="tenue">Si te han pasado un viaje por WhatsApp o mensaje y se abrió en el navegador, cópialo y pégalo aquí para tenerlo en la app.</p>
+    <label>Enlace del viaje <input name="enlace" type="url" inputmode="url" placeholder="https://santimaal.github.io/rumbo/#v=…" autocomplete="off"></label>
+    <div class="fila"><button type="button" class="suave" id="pegar-enlace">📋 Pegar</button><button class="fuerte">Abrir</button></div>
+  </form>
+</dialog>
+
 <dialog id="dlg-elegir" aria-labelledby="elegir-titulo">
   <form method="dialog">
     <h2 id="elegir-titulo" tabindex="-1" autofocus>¿A qué viaje lo añado?</h2>

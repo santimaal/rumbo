@@ -16,6 +16,8 @@ async function sinRed(page, { horarios = [], nube = false } = {}) {
     // Con una nube falsa instalada en el contexto, Supabase la atiende ella.
     if (nube && url.host.endsWith('supabase.co')) return route.fallback();
     const json = (cuerpo) => route.fulfill({ json: cuerpo });
+    if (url.host === 'api.open-meteo.com' && !url.searchParams.get('start_date')) return json({ timezone: 'Europe/Prague', utc_offset_seconds: 3600 });
+    if (url.host === 'open.er-api.com') return json({ result: 'success', rates: { EUR: 1, CZK: 24.5, USD: 1.08 } });
     if (url.host === 'api.open-meteo.com') {
       const desde = new Date(`${url.searchParams.get('start_date')}T12:00:00Z`);
       const hasta = new Date(`${url.searchParams.get('end_date')}T12:00:00Z`);
@@ -746,4 +748,132 @@ test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: /Novedades/ })).toBeHidden();
+});
+
+test('el último día dice cuándo salir hacia el aeropuerto y el hotel enseña su check-in', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({
+    nombre: 'Praga', destino: 'Praga, Chequia', pais: 'CZ', zona: { lat: 50.0875, lon: 14.4213, radio: 15 }, dias: 3, fecha: '2026-12-10',
+    hoteles: [{ nombre: 'Bílá Labuť', lat: 50.0905, lon: 14.4290, desde: 1, checkin: '14:00', checkout: '12:00', notas: 'Consigna de equipaje' }],
+    vuelta: { numero: 'IB1', salida: '06:40', desde: { iata: 'PRG', nombre: 'Václav Havel', ciudad: 'Praga', lat: 50.1008, lon: 14.26 } },
+    lugares: [lugar('a', 'Karlův most', 50.0865, 14.4114, 1), lugar('b', 'Petřín', 50.0833, 14.3950, 2), lugar('c', 'Klementinum', 50.0864, 14.4161, 3)],
+  })]);
+  await page.goto('/');
+  await page.getByText('Praga', { exact: true }).click();
+  const [d1, d2, d3] = [0, 1, 2].map((i) => page.locator('.dia').nth(i));
+  await expect(d1).toContainText('🏨 Bílá Labuť: check-in desde las 14:00 · Consigna de equipaje');
+  await expect(d2).toContainText(/🌙 Mañana sales sobre las 0\d:\d\d: deja la maleta lista y el taxi reservado/);
+  await expect(d3).toContainText(/🚕 Sal del hotel sobre las 0\d:\d\d, para llegar 2 h antes del vuelo/);
+  await expect(d3).toContainText('A esa hora hay poco transporte');
+  await expect(d3).toContainText('🏨 Check-out de Bílá Labuť hasta las 12:00');
+  // Lo del último día que cae después de irse queda avisado, y no se propone comer ni cenar.
+  await expect(d3.locator('.horas span')).toContainText('⚠ Después de salir al aeropuerto');
+  await expect(d3.locator('.aviso-comida')).toHaveCount(0);
+  // Atardecer en hora de Praga: el 10 de diciembre, hacia las 15:58.
+  await expect(d1).toContainText(/🌅 15:5\d|🌅 16:0\d/);
+});
+
+test('los datos del alojamiento se editan en Vuelos y hotel', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ hoteles: [{ nombre: 'Hotel Roma', lat: 41.9, lon: 12.49, desde: 1 }] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: 'Vuelos y hotel' }).click();
+  await page.getByLabel('Check-in en Hotel Roma desde').fill('15:00');
+  await page.getByLabel('Check-out hasta').fill('11:00');
+  await page.getByLabel('Notas del alojamiento').fill('Recepción 24 h');
+  await page.getByRole('button', { name: 'Guardar' }).click();
+  expect((await guardados(page))[0].hoteles[0]).toMatchObject({ checkin: '15:00', checkout: '11:00', notas: 'Recepción 24 h' });
+  await expect(page.locator('.dia').first()).toContainText('🏨 Hotel Roma: check-in desde las 15:00 · Recepción 24 h');
+});
+
+test('pendientes con casillas y platos para probar', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje()]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: /Notas y consejos/ }).click();
+  await page.getByLabel('Nuevo pendiente').fill('Reservar el barco');
+  await page.getByLabel('Nuevo pendiente').press('Enter');
+  // El foco vuelve al campo para seguir apuntando.
+  await expect(page.getByLabel('Nuevo pendiente')).toBeFocused();
+  await page.getByLabel('Nuevo pendiente').fill('Reservar el taxi');
+  await page.getByRole('button', { name: 'Añadir' }).first().click();
+  await page.getByRole('checkbox', { name: 'Reservar el barco' }).check();
+  await expect(page.locator('.tarea').last()).toHaveClass(/hecha/);
+
+  await page.getByLabel('Nuevo plato para probar').fill('Svíčková');
+  await page.getByLabel('Nuevo plato para probar').press('Enter');
+  await page.getByRole('button', { name: 'Svíčková', exact: true }).click();
+  await expect(page.getByRole('button', { name: '✓ Svíčková' })).toHaveAttribute('aria-pressed', 'true');
+
+  const v = (await guardados(page))[0];
+  expect(v.tareas.map((t) => `${t.texto}:${t.hecha}`)).toEqual(['Reservar el barco:true', 'Reservar el taxi:false']);
+  expect(v.probar).toMatchObject([{ nombre: 'Svíčková', probado: true }]);
+  await page.getByRole('button', { name: '‹ Roma' }).click();
+  await expect(page.getByRole('button', { name: /Notas y consejos.*1 pendiente/ })).toBeVisible();
+});
+
+test('el conversor pasa de euros a coronas y al revés', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ nombre: 'Praga', destino: 'Praga, Chequia', pais: 'CZ' })]);
+  await page.goto('/');
+  await page.getByText('Praga', { exact: true }).click();
+  await page.getByRole('button', { name: /Conversor.*1 € = 24,5 CZK/ }).click();
+  await page.getByLabel('Euros (€)').fill('10');
+  await expect(page.getByLabel(/corona checa/i)).toHaveValue('245');
+  await page.getByLabel(/corona checa/i).fill('120');
+  await expect(page.getByLabel('Euros (€)')).toHaveValue('4.9');
+});
+
+test('en la portada, deslizar un viaje a la derecha deja borrarlo', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje(), viaje({ id: 'lis', nombre: 'Lisboa', destino: 'Lisboa, Portugal', pais: 'PT' })]);
+  page.on('dialog', (d) => d.accept());
+  await page.goto('/');
+  const fila = page.locator('.fila-viaje', { hasText: 'Lisboa' });
+  const caja = await fila.boundingBox();
+  await page.mouse.move(caja.x + 40, caja.y + caja.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(caja.x + 160, caja.y + caja.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(fila).toHaveClass(/deslizada/);
+  // Deslizar no abre el viaje.
+  await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
+  await page.getByRole('button', { name: 'Borrar «Lisboa»' }).click();
+  await expect(page.locator('.fila-viaje', { hasText: 'Lisboa' })).toHaveCount(0);
+  expect((await guardados(page)).map((v) => v.nombre)).toEqual(['Roma']);
+  // Un toque normal sigue abriendo el viaje.
+  await page.getByText('Roma', { exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Roma' })).toBeVisible();
+});
+
+test('un enlace abierto en el navegador del móvil se puede llevar a la app instalada', async ({ browser }) => {
+  const falsa = nubeFalsa();
+  falsa.viajes.set('compartido01', { version: 1, datos: { nombre: 'Praga', destino: 'Praga, Chequia', dias: 2, lugares: [], hoteles: [] } });
+  const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+  const contexto = await browser.newContext({ userAgent: iphone, viewport: { width: 390, height: 844 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  await falsa.instalar(contexto);
+  // En Safari: elige llevarlo a la app y el enlace queda copiado.
+  const safari = await contexto.newPage();
+  await sinRed(safari, { nube: true });
+  await safari.goto('/#v=compartido01');
+  await safari.getByRole('button', { name: /En la app Rumbo instalada/ }).click();
+  await expect(safari.locator('#aviso')).toContainText('Enlace copiado');
+  expect(await safari.evaluate(() => navigator.clipboard.readText())).toMatch(/#v=compartido01$/);
+  expect(await safari.evaluate(() => JSON.parse(localStorage.getItem('rumbo') ?? '{"viajes":[]}').viajes.length)).toBe(0);
+  await safari.close();
+  // En la app instalada: pega el enlace y el viaje se añade.
+  const app = await contexto.newPage();
+  await sinRed(app, { nube: true });
+  await app.addInitScript(() => Object.defineProperty(navigator, 'standalone', { value: true }));
+  app.on('dialog', (d) => d.accept());
+  await app.goto('/');
+  await app.getByRole('button', { name: '📥 Abrir enlace compartido' }).click();
+  await app.getByRole('button', { name: '📋 Pegar' }).click();
+  await expect(app.getByLabel('Enlace del viaje', { exact: true })).toHaveValue(/#v=compartido01$/);
+  await app.getByRole('button', { name: 'Abrir', exact: true }).click();
+  await expect(app.getByRole('heading', { name: 'Praga' })).toBeVisible();
+  await expect(app.getByText(/☁️ compartido/)).toBeVisible();
+  await contexto.close();
 });

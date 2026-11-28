@@ -26,5 +26,14 @@
       "text": "texto",
       "url": "enlace"
     }
+  },
+  "id": "./",
+  "scope": "./",
+  "handle_links": "preferred",
+  "launch_handler": {
+    "client_mode": [
+      "navigate-existing",
+      "auto"
+    ]
   }
 }
