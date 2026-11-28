@@ -198,6 +198,8 @@ input[type=date], input[type=time] { min-height: 48px; -webkit-appearance: none;
 .barra { position: fixed; inset: auto 0 0; padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px); background: linear-gradient(transparent, var(--fondo) 30%); z-index: 2; }
 .barra .fila { max-width: 608px; margin: auto; }
 .barra button { min-height: 50px; }
+/* Con el teclado abierto el iPhone deja la barra fija a media pantalla: mientras se escribe, no se enseña. */
+.con-teclado .barra { display: none; }
 #aviso { position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 84px); max-width: 480px; margin: auto; z-index: 3; background: var(--tinta); color: var(--fondo); border-radius: 12px; padding: 12px 16px; }
 #aviso:empty { display: none; }
 .accion-aviso { color: var(--fondo); text-decoration: underline; font-weight: 700; min-height: 0; padding: 0 4px; }

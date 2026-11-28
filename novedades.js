@@ -3,7 +3,10 @@
 export const NOVEDADES = [
   {
     version: 19,
-    cosas: ['😋 En «Para probar», la × para quitar un plato va dentro de su etiqueta.'],
+    cosas: [
+      '😋 En «Para probar», la × para quitar un plato va dentro de su etiqueta.',
+      '⌨️ Al escribir, la barra de botones de abajo se esconde para no quedarse a media pantalla encima del teclado.',
+    ],
   },
   {
     version: 18,

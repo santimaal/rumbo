@@ -319,6 +319,20 @@ test('la página no se amplía con los dedos, el mapa sí', async ({ page }) => 
   expect(await bloqueado(true)).toBe(false);
 });
 
+test('con el teclado abierto no se enseña la barra de abajo', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ consejos: [{ tipo: 'comida', texto: 'Supplì en Trastevere' }] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.getByRole('button', { name: /Notas y consejos/ }).click();
+  const barra = page.getByRole('button', { name: '+ Consejo' });
+  await expect(barra).toBeVisible();
+  await page.evaluate(() => document.documentElement.classList.add('con-teclado'));
+  await expect(barra).toBeHidden();
+  await page.evaluate(() => document.documentElement.classList.remove('con-teclado'));
+  await expect(barra).toBeVisible();
+});
+
 test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ page, browser }) => {
   await sinRed(page);
   await page.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
