@@ -187,10 +187,25 @@ function iniciarNube() {
   });
 }
 
-function avisar(mensaje) {
-  $('aviso').textContent = mensaje;
+function avisar(mensaje, accion = null) {
+  $('aviso').replaceChildren(mensaje, ...(accion ? [' ', el('button', { type: 'button', className: 'texto accion-aviso', textContent: accion.texto, onclick: () => {
+    $('aviso').textContent = '';
+    accion.hacer();
+  } })] : []));
   clearTimeout(temporizador);
-  temporizador = setTimeout(() => { $('aviso').textContent = ''; }, 5000);
+  temporizador = setTimeout(() => { $('aviso').textContent = ''; }, accion ? 10000 : 5000);
+}
+
+/** Reorganiza los lugares del viaje dejando unos segundos para deshacerlo. */
+function reorganizar(v, lugares, mensaje) {
+  const antes = v.lugares;
+  v.lugares = lugares;
+  guardar();
+  avisar(mensaje, { texto: 'Deshacer', hacer: () => {
+    v.lugares = antes;
+    guardar();
+    avisar('Orden recuperado.');
+  } });
 }
 
 function el(etiqueta, props = {}, ...hijos) {
@@ -1200,8 +1215,7 @@ async function organizarViaje(v) {
     v.lugares.some((l) => l.dia) ? { texto: '📅 Cada día por separado', detalle: 'Solo ordena las paradas de cada día; ninguna cambia de día', valor: 'dias' } : null,
   ]);
   if (!como) return;
-  v.lugares = como === 'todo' ? organizar(v) : ordenarDias(v);
-  guardar();
+  reorganizar(v, como === 'todo' ? organizar(v) : ordenarDias(v), como === 'todo' ? 'Viaje reorganizado.' : 'Paradas ordenadas en cada día.');
 }
 
 // Mientras no haya días asignados, la ruta se calcula sola; después se respeta lo que haya.
@@ -1638,13 +1652,21 @@ function abrirLogistica(v) {
     e.preventDefault();
     buscarHotel(v);
   };
-  f.onsubmit = () => {
+  f.onsubmit = async () => {
     const antes = JSON.stringify([v.ida, v.vuelta, v.hoteles]);
     const lleno = (x) => (x.numero || x.salida || x.llegada ? x : null);
     Object.assign(v, { fecha: f.elements.fecha.value, ida: lleno(borrador.ida), vuelta: lleno(borrador.vuelta), hoteles: borrador.hoteles });
     const cambia = antes !== JSON.stringify([v.ida, v.vuelta, v.hoteles]);
-    if (cambia && v.lugares.length && confirm('¿Recalculo los días y las rutas con estos vuelos y hoteles? Cambiará el orden actual.')) v.lugares = organizar(v);
     guardar();
+    if (!cambia || !v.lugares.some((l) => l.dia)) return;
+    // Lo normal es conservar el itinerario: la primera opción no toca nada.
+    const como = await preguntar('Vuelos y hotel guardados. ¿Toco el itinerario?', [
+      { texto: '✋ Dejarlo como está', detalle: 'Las horas de cada día ya tienen en cuenta los vuelos y hoteles', valor: 'nada' },
+      { texto: '📅 Ordenar cada día', detalle: 'Reordena las paradas de cada día desde el hotel; ninguna cambia de día', valor: 'dias' },
+      { texto: '🗺️ Reorganizar todo el viaje', detalle: 'Reparte de nuevo todos los lugares entre los días', valor: 'todo' },
+    ]);
+    if (como === 'dias') reorganizar(v, ordenarDias(v), 'Paradas ordenadas en cada día.');
+    if (como === 'todo') reorganizar(v, organizar(v), 'Viaje reorganizado.');
   };
   $('dlg-logistica').showModal();
 }

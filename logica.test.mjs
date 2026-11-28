@@ -296,3 +296,12 @@ assert.deepEqual([conListas.hoteles[0].checkin, conListas.hoteles[0].checkout, c
   const cerca = salidaAeropuerto({ dias: 1, hoteles: [{ nombre: 'Hotel', lat: 50.0998, lon: 14.2867, desde: 1 }], vuelta: { salida: '10:00', desde: { iata: 'PRG', lat: 50.1008, lon: 14.26 } } });
   assert.ok(cerca.trayecto <= 12 && cerca.cerca);
 }
+
+// Horas sin «:60» y una cena temprana cuenta como cena.
+assert.equal(hora(16 * 60 + 59.7), '17:00');
+assert.equal(hora(24 * 60 + 5), '00:05');
+{
+  const conCena = agenda({ dias: 1 }, 1, [{ tipo: 'monumento', estancia: 540 }, { tipo: 'comida' }], [0, 0]);
+  assert.equal(conCena.horas[1].llega, 19 * 60);
+  assert.deepEqual(conCena.comidas.map((c) => c.tipo), ['comida']);
+}

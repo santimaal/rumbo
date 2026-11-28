@@ -742,7 +742,7 @@ test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) 
   // Desde Ajustes se pueden volver a ver.
   await page.getByRole('button', { name: 'Ajustes' }).click();
   await page.getByRole('button', { name: 'Ver novedades' }).click();
-  await expect(ventana).toContainText('enlace corto');
+  await expect(ventana).toContainText('juntan los cambios de los dos');
 });
 
 test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {
@@ -785,7 +785,7 @@ test('los datos del alojamiento se editan en Vuelos y hotel', async ({ page }) =
   await page.getByLabel('Check-out hasta').fill('11:00');
   await page.getByLabel('Notas del alojamiento').fill('Recepción 24 h');
   await page.getByRole('button', { name: 'Guardar' }).click();
-  expect((await guardados(page))[0].hoteles[0]).toMatchObject({ checkin: '15:00', checkout: '11:00', notas: 'Recepción 24 h' });
+  await expect.poll(async () => (await guardados(page))[0].hoteles[0]).toMatchObject({ checkin: '15:00', checkout: '11:00', notas: 'Recepción 24 h' });
   await expect(page.locator('.dia').first()).toContainText('🏨 Hotel Roma: check-in desde las 15:00 · Recepción 24 h');
 });
 
@@ -878,4 +878,27 @@ test('un enlace abierto en el navegador del móvil se puede llevar a la app inst
   await expect(app.getByRole('heading', { name: 'Praga' })).toBeVisible();
   await expect(app.getByText(/☁️ compartido/)).toBeVisible();
   await contexto.close();
+});
+
+test('cambiar vuelos u hoteles no reorganiza el itinerario salvo que se pida, y reorganizar se puede deshacer', async ({ page }) => {
+  await sinRed(page);
+  await sembrar(page, [viaje({ dias: 2, lugares: [
+    lugar('c', 'Panteón', 41.8986, 12.4769, 1), lugar('a', 'Coliseo', 41.8902, 12.4922, 1), lugar('v', 'Museos Vaticanos', 41.9065, 12.4536, 2), lugar('t', 'Tívoli', 41.96, 12.80, 0)] })]);
+  const orden = async () => (await guardados(page))[0].lugares.map((l) => `${l.dia}:${l.id}`).join(' ');
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  const original = await orden();
+  await page.getByRole('button', { name: 'Vuelos y hotel' }).click();
+  await page.fill('[name="ida-llegada"]', '11:40');
+  await page.getByRole('button', { name: 'Guardar' }).click();
+  await page.getByRole('button', { name: /Dejarlo como está/ }).click();
+  expect((await guardados(page))[0].ida.llegada).toBe('11:40');
+  expect(await orden()).toBe(original);
+
+  await page.getByRole('button', { name: 'Organizar' }).click();
+  await page.getByRole('button', { name: /Todo el viaje/ }).click();
+  await expect.poll(orden).not.toBe(original);
+  await page.getByRole('button', { name: 'Deshacer' }).click();
+  await expect.poll(orden).toBe(original);
+  await expect(page.locator('#aviso')).toContainText('Orden recuperado');
 });

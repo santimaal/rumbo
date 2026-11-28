@@ -444,7 +444,11 @@ export function minutosTramo(a, b) {
   return km < A_PIE_KM ? (km * 1.3 / 4.5) * 60 : (km * 1.3 / 30) * 60 + 5;
 }
 
-export const hora = (m) => `${dosCifras(Math.floor(m / 60) % 24)}:${dosCifras(Math.round(m % 60))}`;
+// Se redondea antes de partir en horas y minutos: si no, 16:59,7 saldría como «16:60».
+export const hora = (m) => {
+  const r = Math.round(m);
+  return `${dosCifras(Math.floor(r / 60) % 24)}:${dosCifras(r % 60)}`;
+};
 
 const FRANJAS = [['comida', 13 * 60 + 30, 15 * 60 + 30, 60], ['cena', 20 * 60 + 30, 22 * 60, 75]];
 
@@ -467,7 +471,9 @@ export function agenda(v, dia, paradas, trayectos) {
   const comidas = [];
   for (const [tipo, desde, hasta, dura] of FRANJAS) {
     if (!paradas.length) break;
-    const yaCome = paradas.some((l, i) => l.tipo === 'comida' && horas[i].sale > desde && horas[i].llega < hasta);
+    // Cuenta como cena cualquier sitio de comer al que se llega desde las 17:30, aunque sea antes de la franja.
+    const yaCome = paradas.some((l, i) => l.tipo === 'comida'
+      && (tipo === 'cena' ? horas[i].llega >= 17 * 60 + 30 : horas[i].sale > desde && horas[i].llega < hasta));
     if (yaCome) continue;
     // Tras la primera parada que acaba ya dentro de la franja; si el día termina antes, al final.
     const primera = horas.findIndex((h) => h.sale >= desde);

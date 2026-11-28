@@ -2,6 +2,14 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 13,
+    cosas: [
+      '✋ Al cambiar vuelos u hoteles, tu itinerario se queda como está salvo que pidas reordenarlo, y reorganizar se puede deshacer.',
+      '🚕 El traslado al aeropuerto se calcula en coche, y si la última noche duermes en un hotel del aeropuerto cuenta solo unos minutos.',
+      'Arreglado: horas como «16:60» y avisos de «hora de cenar» cuando ya había un restaurante para cenar.',
+    ],
+  },
+  {
     version: 12,
     cosas: [
       '🚕 El último día te dice a qué hora salir hacia el aeropuerto, y la víspera te avisa si es de madrugada.',
