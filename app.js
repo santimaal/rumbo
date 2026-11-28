@@ -615,9 +615,9 @@ function lineasSalida(v, dia) {
   const cuando = `${s.desdeHotel ? 'Sal del hotel' : 'Sal hacia el aeropuerto'} sobre las ${hora(s.sale)}`;
   const detalle = `para llegar 2 h antes del vuelo (trayecto de unos ${s.trayecto} min)`;
   const lineas = [];
-  if (dia === v.dias && !s.anterior) lineas.push(`🚕 ${cuando}, ${detalle}.${s.madrugada ? ' A esa hora hay poco transporte: mejor taxi reservado.' : ''}`);
+  if (dia === v.dias && !s.anterior) lineas.push(`🚕 ${cuando}, ${detalle}.${s.madrugada && !s.cerca ? ' A esa hora hay poco transporte: mejor taxi reservado.' : ''}`);
   if (dia === v.dias - 1 && s.anterior) lineas.push(`🚕 Esta noche: ${cuando.toLowerCase()}, ${detalle}.`);
-  if (dia === v.dias - 1 && s.madrugada && !s.anterior) lineas.push(`🌙 Mañana sales sobre las ${hora(s.sale)}: deja la maleta lista y el taxi reservado.`);
+  if (dia === v.dias - 1 && s.madrugada && !s.anterior) lineas.push(`🌙 Mañana sales sobre las ${hora(s.sale)}: deja la maleta lista${s.cerca ? '' : ' y el taxi reservado'}.`);
   return lineas.map((t) => el('p', { className: 'vuelo aviso-salida', textContent: t }));
 }
 

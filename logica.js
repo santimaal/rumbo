@@ -686,6 +686,7 @@ export function atardecer(fechaISO, lat, lon) {
 }
 
 const ANTES_DEL_VUELO = 120;
+const HOTEL_AEROPUERTO = /\b(airport|aeropuerto|aeroport|aeroporto|flughafen|letiste|letisti)\b/;
 /**
  * A qué hora salir hacia el aeropuerto el último día: dos horas antes del vuelo, más el trayecto desde el hotel
  * (en coche, o 45 minutos si no se sabe dónde están) y diez de margen. `anterior` si toca salir la víspera.
@@ -695,9 +696,13 @@ export function salidaAeropuerto(v) {
   if (vuelo === null) return null;
   const hotel = extremosDelDia(v, v.dias).inicio;
   const aeropuerto = v.vuelta.desde;
-  const trayecto = Math.round(hotel && aeropuerto && !hotel.iata ? minutosTramo(hotel, aeropuerto) : 45);
+  const desdeHotel = Boolean(hotel && !hotel.iata);
+  // Al aeropuerto se va en coche o taxi aunque esté cerca; desde un hotel «del aeropuerto», unos 15 minutos.
+  const enCoche = (a, b) => (distanciaKm(a, b) * 1.3 / 30) * 60 + 5;
+  const trayecto = Math.round(desdeHotel && aeropuerto ? enCoche(hotel, aeropuerto)
+    : desdeHotel && HOTEL_AEROPUERTO.test(sinAcentos(hotel.nombre ?? '')) ? 15 : 45);
   const sale = Math.floor((vuelo - ANTES_DEL_VUELO - trayecto - 10) / 5) * 5;
-  return { sale: (sale + 1440) % 1440, anterior: sale < 0, trayecto, madrugada: sale < 7 * 60, desdeHotel: Boolean(hotel && !hotel.iata) };
+  return { sale: (sale + 1440) % 1440, anterior: sale < 0, trayecto, madrugada: sale < 7 * 60, desdeHotel, cerca: trayecto <= 20 };
 }
 
 // Moneda de cada país, para el conversor. Los que no estén se quedan sin él.

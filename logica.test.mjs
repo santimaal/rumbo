@@ -287,3 +287,12 @@ assert.deepEqual([conListas.hoteles[0].checkin, conListas.hoteles[0].checkout, c
   const juntas = fusionar({ tareas: [t1], probar: [] }, { tareas: [{ ...t1, hecha: true }], probar: [] }, { tareas: [t1, { id: 't2', texto: 'Taxi', hecha: false }], probar: [] });
   assert.deepEqual(juntas.tareas.map((t) => `${t.texto}:${t.hecha}`), ['Reservar barco:true', 'Taxi:false']);
 }
+
+// Dormir la última noche en un hotel del aeropuerto: trayecto corto y sin prisas de taxi.
+{
+  const ramada = salidaAeropuerto({ dias: 5, hoteles: [{ nombre: 'Bílá Labuť', lat: 50.09, lon: 14.43, desde: 1 }, { nombre: 'Ramada Airport Hotel Praha', lat: 50.0998, lon: 14.2867, desde: 4 }], vuelta: { salida: '06:50' } });
+  assert.deepEqual([ramada.trayecto, ramada.sale, ramada.cerca], [15, 4 * 60 + 25, true]);
+  // Aunque el aeropuerto esté a menos de 2 km, el traslado se cuenta en coche.
+  const cerca = salidaAeropuerto({ dias: 1, hoteles: [{ nombre: 'Hotel', lat: 50.0998, lon: 14.2867, desde: 1 }], vuelta: { salida: '10:00', desde: { iata: 'PRG', lat: 50.1008, lon: 14.26 } } });
+  assert.ok(cerca.trayecto <= 12 && cerca.cerca);
+}
