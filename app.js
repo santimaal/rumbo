@@ -325,7 +325,7 @@ function pintarInicio() {
   completarPaises();
 }
 
-/** Viaje de la portada. Deslizándolo a la derecha aparece la papelera para borrarlo. */
+/** Viaje de la portada. Deslizándolo a la izquierda aparece la papelera para borrarlo. */
 function filaViaje(v) {
   const papelera = botonIcono('borrar', `Borrar «${v.nombre}»`, () => borrarViaje(v), 'borrar-viaje');
   papelera.tabIndex = -1;
@@ -342,7 +342,7 @@ function filaViaje(v) {
   let movido = false;
   const abrir = (si) => {
     fila.classList.toggle('deslizada', si);
-    delante.style.transform = si ? `translateX(${ANCHO}px)` : '';
+    delante.style.transform = si ? `translateX(-${ANCHO}px)` : '';
     papelera.tabIndex = si ? 0 : -1;
   };
   delante.addEventListener('pointerdown', (e) => {
@@ -364,14 +364,14 @@ function filaViaje(v) {
     }
     if (!horizontal) return;
     movido = true;
-    dx = Math.min(ANCHO + 40, Math.max(0, (inicio.abierta ? ANCHO : 0) + mx));
+    dx = Math.max(-(ANCHO + 40), Math.min(0, (inicio.abierta ? -ANCHO : 0) + mx));
     delante.style.transform = `translateX(${dx}px)`;
   });
   const soltar = () => {
     if (!inicio) return;
     inicio = null;
     fila.classList.remove('moviendose');
-    if (horizontal) abrir(dx > ANCHO / 2);
+    if (horizontal) abrir(dx < -ANCHO / 2);
   };
   delante.addEventListener('pointerup', soltar);
   delante.addEventListener('pointercancel', soltar);
@@ -480,6 +480,19 @@ function textoAtardecer(v, dia) {
   if (!v.fecha || !huso) return '';
   const puesta = atardecer(fechaISO(v, dia), v.zona.lat, v.zona.lon);
   return puesta ? `🌅 ${puesta.toLocaleTimeString('es', { timeZone: huso, hour: '2-digit', minute: '2-digit' })}` : '';
+}
+
+/** Para organizar: la hora local de la puesta de cada día en minutos, si se sabe la fecha y la zona horaria. */
+function conPuesta(v) {
+  const huso = v.zona && husos.get(claveZona(v.zona));
+  return {
+    puesta: (dia) => {
+      const puesta = v.fecha && huso && atardecer(fechaISO(v, dia), v.zona.lat, v.zona.lon);
+      if (!puesta) return null;
+      const [h, m] = puesta.toLocaleTimeString('en-GB', { timeZone: huso, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).split(':').map(Number);
+      return h * 60 + m;
+    },
+  };
 }
 
 async function completarHuso(v) {
@@ -1240,7 +1253,7 @@ async function organizarViaje(v) {
     v.lugares.some((l) => l.dia) ? { texto: '📅 Cada día por separado', detalle: 'Solo ordena las paradas de cada día; ninguna cambia de día', valor: 'dias' } : null,
   ]);
   if (!como) return;
-  reorganizar(v, como === 'todo' ? organizar(v) : ordenarDias(v), como === 'todo' ? 'Viaje reorganizado.' : 'Paradas ordenadas en cada día.');
+  reorganizar(v, como === 'todo' ? organizar(v, conPuesta(v)) : ordenarDias(v, conPuesta(v)), como === 'todo' ? 'Viaje reorganizado.' : 'Paradas ordenadas en cada día.');
 }
 
 // Mientras no haya días asignados, la ruta se calcula sola; después se respeta lo que haya.
@@ -1249,7 +1262,7 @@ function anadir(v, nuevos) {
   v.lugares.push(...nuevos.map((l) => ({
     enlace: '', nota: '', ...l, tipo: l.tipo || adivinarCategoria(`${l.nombre} ${l.direccion ?? ''}`), id: crypto.randomUUID(), dia: 0,
   })));
-  if (sinOrganizar) v.lugares = organizar(v);
+  if (sinOrganizar) v.lugares = organizar(v, conPuesta(v));
   guardar();
 }
 
@@ -1296,7 +1309,7 @@ async function situarPendientes(v) {
     vigente.lugares.push(...situados);
     vigente.porSituar = [];
     // Si no traían días, se reparten como al pulsar Organizar.
-    if (sinDias && vigente.lugares.length && vigente.lugares.every((l) => !l.dia)) vigente.lugares = organizar(vigente);
+    if (sinDias && vigente.lugares.length && vigente.lugares.every((l) => !l.dia)) vigente.lugares = organizar(vigente, conPuesta(vigente));
     avisar([
       situados.length ? `Situados en el mapa ${plural(situados.length, 'lugar nuevo', 'lugares nuevos')}.` : '',
       perdidos.length ? `No encontré: ${perdidos.join(', ')}.` : '',
@@ -1690,8 +1703,8 @@ function abrirLogistica(v) {
       { texto: '📅 Ordenar cada día', detalle: 'Reordena las paradas de cada día desde el hotel; ninguna cambia de día', valor: 'dias' },
       { texto: '🗺️ Reorganizar todo el viaje', detalle: 'Reparte de nuevo todos los lugares entre los días', valor: 'todo' },
     ]);
-    if (como === 'dias') reorganizar(v, ordenarDias(v), 'Paradas ordenadas en cada día.');
-    if (como === 'todo') reorganizar(v, organizar(v), 'Viaje reorganizado.');
+    if (como === 'dias') reorganizar(v, ordenarDias(v, conPuesta(v)), 'Paradas ordenadas en cada día.');
+    if (como === 'todo') reorganizar(v, organizar(v, conPuesta(v)), 'Viaje reorganizado.');
   };
   $('dlg-logistica').showModal();
 }

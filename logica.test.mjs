@@ -305,3 +305,70 @@ assert.equal(hora(24 * 60 + 5), '00:05');
   assert.equal(conCena.horas[1].llega, 19 * 60);
   assert.deepEqual(conCena.comidas.map((c) => c.tipo), ['comida']);
 }
+
+// Organizar por horas: una visita de 4 horas se queda sola en su día y las cortas van juntas en el otro.
+{
+  const larga = { id: 'M', lat: 0, lon: 0, tipo: 'museo', estancia: 240 };
+  const cortas = Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, lat: 0, lon: 0.002 * (i + 1), tipo: 'otro', estancia: 20 }));
+  const r = organizar({ dias: 2, hoteles: [], lugares: [larga, ...cortas] });
+  const diaDe = Object.fromEntries(r.map((l) => [l.id, l.dia]));
+  assert.ok(cortas.every((c) => diaDe[c.id] !== diaDe.M), JSON.stringify(diaDe));
+}
+// Un sitio que cierra los jueves no cae en jueves (el viaje empieza un jueves).
+{
+  const lugares = [
+    { id: 'x', lat: 0, lon: 0, tipo: 'museo', horario: 'Mo-We,Fr-Su 10:00-18:00' },
+    { id: 'a', lat: 0, lon: 0.001, tipo: 'otro' }, { id: 'b', lat: 0, lon: 0.002, tipo: 'otro' },
+    { id: 'c', lat: 0, lon: 0.003, tipo: 'otro' }, { id: 'd', lat: 0, lon: 0.004, tipo: 'otro' },
+  ];
+  const r = organizar({ dias: 2, fecha: '2026-12-10', hoteles: [], lugares });
+  assert.equal(r.find((l) => l.id === 'x').dia, 2);
+}
+// Las comidas a su hora: café al empezar, comida a mediodía entre visitas, cena al final y copas lo último.
+{
+  const hotel = { lat: 0, lon: 0 };
+  const lugares = [
+    { id: 'B', lat: 0, lon: 0.004, tipo: 'copas' }, { id: 'L1', lat: 0, lon: 0.005, tipo: 'comida' }, { id: 'L2', lat: 0, lon: 0.001, tipo: 'comida' },
+    { id: 'V1', lat: 0, lon: 0.002, tipo: 'monumento', estancia: 90 }, { id: 'V2', lat: 0, lon: 0.003, tipo: 'monumento', estancia: 90 },
+    { id: 'V3', lat: 0, lon: 0.006, tipo: 'monumento', estancia: 90 }, { id: 'V4', lat: 0, lon: 0.007, tipo: 'monumento', estancia: 90 },
+    { id: 'C', lat: 0, lon: 0.008, tipo: 'cafe' }, { id: 'M', lat: 0, lon: 0.0035, tipo: 'mirador' },
+  ];
+  const orden = organizar({ dias: 1, hoteles: [{ ...hotel, desde: 1 }], lugares }).map((l) => l.id);
+  assert.equal(orden[0], 'C');
+  assert.equal(orden.at(-1), 'B');
+  const comer = orden.findIndex((id) => id.startsWith('L'));
+  assert.ok(comer > 1 && comer < orden.length - 3, orden.join());
+  assert.ok(orden.at(-2).startsWith('L') && orden.at(-3) === 'M', orden.join());
+  // Ordenar cada día aplica lo mismo sin cambiar a nadie de día.
+  assert.deepEqual(ordenarDias({ dias: 1, hoteles: [{ ...hotel, desde: 1 }], lugares: lugares.map((l) => ({ ...l, dia: 1 })) }).map((l) => l.id), orden);
+}
+// Los restaurantes se reparten: no se juntan cuatro en el mismo día habiendo otro.
+{
+  const lugares = [
+    ...['V1', 'V2', 'V3', 'V4'].map((id, i) => ({ id, lat: 0, lon: i * 0.02, tipo: 'monumento' })),
+    ...['R1', 'R2', 'R3', 'R4'].map((id) => ({ id, lat: 0, lon: 0.001, tipo: 'comida' })),
+  ];
+  const r = organizar({ dias: 2, hoteles: [], lugares });
+  const porDia = [1, 2].map((d) => r.filter((l) => l.dia === d && l.tipo === 'comida').length);
+  assert.deepEqual(porDia, [2, 2]);
+}
+// Los que no caben en ningún día se quedan sin día, como alternativas.
+{
+  const lugares = [
+    { id: 'V', lat: 0, lon: 0, tipo: 'monumento' },
+    ...['R1', 'R2', 'R3', 'R4'].map((id) => ({ id, lat: 0, lon: 0.001, tipo: 'comida' })),
+  ];
+  const r = organizar({ dias: 1, hoteles: [], lugares });
+  assert.equal(r.length, 5);
+  assert.equal(r.filter((l) => l.tipo === 'comida' && l.dia === 1).length, 2);
+  assert.equal(r.filter((l) => !l.dia).length, 2);
+}
+// Con la hora de la puesta, el mirador no se deja para el final si así se vería de noche.
+{
+  const lugares = ['V1', 'V2', 'V3', 'V4'].map((id, i) => ({ id, lat: 0, lon: i * 0.002, tipo: 'monumento', estancia: 120 }));
+  lugares.push({ id: 'M', lat: 0, lon: 0.003, tipo: 'mirador' });
+  const v = { dias: 1, hoteles: [], lugares };
+  assert.equal(organizar(v).at(-1).id, 'M');
+  const orden = organizar(v, { puesta: () => 16 * 60 }).map((l) => l.id);
+  assert.ok(orden.indexOf('M') < orden.length - 1, orden.join());
+}

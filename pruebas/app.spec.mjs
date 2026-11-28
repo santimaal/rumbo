@@ -727,14 +727,14 @@ test('los lugares que el asistente no pudo situar los sitúa la app al abrir el 
 test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) => {
   await sinRed(page);
   await sembrar(page, [viaje()], { novedadesVistas: false });
-  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '11'); sessionStorage.setItem('vista', '1'); } });
+  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '13'); sessionStorage.setItem('vista', '1'); } });
   await page.goto('/');
   const ventana = page.getByRole('dialog', { name: /Novedades de Rumbo/ });
   await expect(ventana).toBeVisible();
   // Con una sola versión no hay título por versión, ni restos como «null».
-  await expect(ventana).toContainText('a qué hora salir hacia el aeropuerto');
+  await expect(ventana).toContainText('a la izquierda para borrarlo');
   await expect(ventana).not.toContainText('null');
-  await expect(ventana).not.toContainText('juntan los cambios de los dos');
+  await expect(ventana).not.toContainText('ver solo ese día');
   await ventana.getByRole('button', { name: 'Entendido' }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
@@ -742,7 +742,7 @@ test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) 
   // Desde Ajustes se pueden volver a ver.
   await page.getByRole('button', { name: 'Ajustes' }).click();
   await page.getByRole('button', { name: 'Ver novedades' }).click();
-  await expect(ventana).toContainText('juntan los cambios de los dos');
+  await expect(ventana).toContainText('ver solo ese día');
 });
 
 test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {
@@ -781,6 +781,8 @@ test('los datos del alojamiento se editan en Vuelos y hotel', async ({ page }) =
   await page.goto('/');
   await page.getByText('Roma', { exact: true }).click();
   await page.getByRole('button', { name: 'Vuelos y hotel' }).click();
+  // Al abrir no se despliega el calendario de la fecha: el foco va al título.
+  await expect(page.getByRole('heading', { name: 'Vuelos y hotel' })).toBeFocused();
   await page.getByLabel('Check-in en Hotel Roma desde').fill('15:00');
   await page.getByLabel('Check-out hasta').fill('11:00');
   await page.getByLabel('Notas del alojamiento').fill('Recepción 24 h');
@@ -828,16 +830,16 @@ test('el conversor pasa de euros a coronas y al revés', async ({ page }) => {
   await expect(page.getByLabel('Euros (€)')).toHaveValue('4.9');
 });
 
-test('en la portada, deslizar un viaje a la derecha deja borrarlo', async ({ page }) => {
+test('en la portada, deslizar un viaje a la izquierda deja borrarlo', async ({ page }) => {
   await sinRed(page);
   await sembrar(page, [viaje(), viaje({ id: 'lis', nombre: 'Lisboa', destino: 'Lisboa, Portugal', pais: 'PT' })]);
   page.on('dialog', (d) => d.accept());
   await page.goto('/');
   const fila = page.locator('.fila-viaje', { hasText: 'Lisboa' });
   const caja = await fila.boundingBox();
-  await page.mouse.move(caja.x + 40, caja.y + caja.height / 2);
+  await page.mouse.move(caja.x + caja.width - 40, caja.y + caja.height / 2);
   await page.mouse.down();
-  await page.mouse.move(caja.x + 160, caja.y + caja.height / 2, { steps: 8 });
+  await page.mouse.move(caja.x + caja.width - 160, caja.y + caja.height / 2, { steps: 8 });
   await page.mouse.up();
   await expect(fila).toHaveClass(/deslizada/);
   // Deslizar no abre el viaje.

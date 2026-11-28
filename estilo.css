@@ -127,11 +127,11 @@ button:disabled { opacity: .45; cursor: default; }
 .enlace-compartir { font-size: 13px; color: var(--tenue); overflow-wrap: anywhere; text-align: center; max-height: 4.5em; overflow: hidden; }
 .novedades h3 { font-size: 16px; margin: 8px 0 0; color: var(--tenue); }
 .novedades ul { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 8px; }
-/* Portada: el viaje se desliza a la derecha y deja ver la papelera de debajo. */
+/* Portada: el viaje se desliza a la izquierda y deja ver la papelera de debajo. */
 .fila-viaje { position: relative; }
 .fila-viaje .viaje { position: relative; z-index: 1; transition: transform .2s ease-out; touch-action: pan-y; }
 .fila-viaje.moviendose .viaje { transition: none; }
-.borrar-viaje.icono { position: absolute; inset: 0 auto 0 0; width: 84px; height: auto; border-radius: 18px; background: var(--error); color: #fff; }
+.borrar-viaje.icono { position: absolute; inset: 0 0 0 auto; width: 84px; height: auto; border-radius: 18px; background: var(--error); color: #fff; }
 .tareas { display: grid; gap: 2px; }
 .tarea { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--raya); }
 .tarea label { flex: 1; display: flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 400; cursor: pointer; }

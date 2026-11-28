@@ -2,6 +2,16 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 14,
+    cosas: [
+      '🧭 Organizar reparte por las horas que ocupa cada visita, evita los días que cierra cada sitio y deja la comida a mediodía y la cena por la tarde.',
+      '🌅 Los miradores se colocan para llegar antes del atardecer.',
+      '🍽️ Si hay más restaurantes de los que caben, los que sobran quedan en «Sin día» como alternativas.',
+      '👈 En la portada, desliza un viaje a la izquierda para borrarlo.',
+      'Arreglado: al abrir «Vuelos y hotel» ya no salta el calendario solo.',
+    ],
+  },
+  {
     version: 13,
     cosas: [
       '🎯 Junto al ojo de cada día, un botón para ver solo ese día (y su ruta en el mapa). «Ver todos» lo deshace.',

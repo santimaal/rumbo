@@ -116,27 +116,134 @@ export function minutosUtiles(v) {
   });
 }
 
-function repartir(lugares, dias, pesos) {
-  const total = dias.reduce((s, d) => s + pesos[d - 1], 0);
-  const peso = (d) => (total ? pesos[d - 1] / total : 1 / dias.length);
-  return ordenarRuta(lugares).map((l, i, todos) => {
+// Los sitios de comer y beber se reparten aparte de las visitas y van a su hora.
+const PARA_COMER = ['comida', 'cafe', 'copas'];
+const esParaComer = (l) => PARA_COMER.includes(l.tipo);
+const centro = (lista) => (lista.length
+  ? { lat: lista.reduce((s, l) => s + l.lat, 0) / lista.length, lon: lista.reduce((s, l) => s + l.lon, 0) / lista.length } : null);
+
+/** Día de la semana (0 = domingo) del día n del viaje, o null sin fecha. */
+const semanaDe = (v, n) => (v.fecha ? new Date(Date.parse(`${v.fecha}T12:00:00Z`) + (n - 1) * 864e5).getUTCDay() : null);
+const cierraEse = (v, l, n) => {
+  const semana = semanaDe(v, n);
+  return semana !== null && Boolean(l.horario) && horarioDelDia(l.horario, semana)?.length === 0;
+};
+
+/**
+ * Reparte las visitas entre los días por tiempo y no por número: sigue la ruta y cada día se lleva una parte de las
+ * horas (estancia más trayecto) proporcional a las horas libres que tiene.
+ */
+function repartir(lugares, dias, pesos, inicio = null) {
+  const ruta = ordenarRuta(lugares, inicio);
+  const coste = ruta.map((l, i) => {
+    const previo = ruta[i - 1] ?? inicio;
+    return (previo ? minutosTramo(previo, l) : 0) + estanciaDe(l);
+  });
+  const total = coste.reduce((s, c) => s + c, 0) || 1;
+  const libre = dias.reduce((s, d) => s + pesos[d - 1], 0);
+  const peso = (d) => (libre ? pesos[d - 1] / libre : 1 / dias.length);
+  let hecho = 0;
+  return ruta.map((l, i) => {
+    const mitad = (hecho + coste[i] / 2) / total;
+    hecho += coste[i];
     let acumulado = 0;
-    const dia = dias.find((d) => (acumulado += peso(d)) > i / todos.length + 1e-9) ?? dias.at(-1);
+    const dia = dias.find((d) => (acumulado += peso(d)) > mitad + 1e-9) ?? dias.at(-1);
     return { ...l, dia };
   });
 }
 
-/** Ordena las paradas dentro de cada día sin cambiar ninguna de día; las que no tienen día quedan igual. */
-export function ordenarDias(v) {
-  const dias = Array.from({ length: v.dias }, (_, i) => i + 1).flatMap((d) => {
-    const { inicio, fin } = extremosDelDia(v, d);
-    return ordenarRuta(v.lugares.filter((l) => l.dia === d), inicio, fin);
+/** Lo que cierra el día que le toca pasa al día abierto en el que queda más cerca de lo demás. */
+function moverCerrados(v, lugares, dias) {
+  for (const l of lugares) {
+    if (!cierraEse(v, l, l.dia)) continue;
+    const abiertos = dias.filter((d) => d !== l.dia && !cierraEse(v, l, d));
+    if (!abiertos.length) continue;
+    const lejos = (d) => tramo(l, centro(lugares.filter((x) => x !== l && x.dia === d)));
+    l.dia = abiertos.reduce((a, b) => (lejos(b) < lejos(a) ? b : a));
+  }
+}
+
+// Cada día, como mucho, dos sitios de comer (comida y cena), un café y un sitio de copas.
+const CUPO = { comida: 2, cafe: 1, copas: 1 };
+/**
+ * Lleva cada sitio de comer al día abierto cuyas visitas le quedan más cerca y aún tiene hueco para él.
+ * Los que no caben en ningún día se quedan sin día, como alternativas.
+ */
+function repartirComidas(v, comidas, visitas, dias, hotel) {
+  const usados = new Map();
+  return comidas.map((l) => {
+    const lejos = (d) => tramo(l, centro(visitas.filter((x) => x.dia === d)) ?? hotel);
+    const abiertos = dias.filter((d) => !cierraEse(v, l, d));
+    const conHueco = (abiertos.length ? abiertos : dias).filter((d) => (usados.get(`${d}${l.tipo}`) ?? 0) < CUPO[l.tipo]);
+    if (!conHueco.length) return { ...l, dia: 0 };
+    const dia = conHueco.reduce((a, b) => (lejos(b) < lejos(a) ? b : a));
+    usados.set(`${dia}${l.tipo}`, (usados.get(`${dia}${l.tipo}`) ?? 0) + 1);
+    return { ...l, dia };
   });
+}
+
+/** Hora de llegada y salida de cada parada siguiendo la ruta, desde que empieza el día. */
+function relojDe(v, dia, lista, inicio) {
+  const aterriza = dia === 1 ? minutos(v.ida?.llegada) : null;
+  let reloj = aterriza === null ? DE : aterriza + 90;
+  return lista.map((l, i) => {
+    const previo = lista[i - 1] ?? inicio;
+    reloj += previo ? minutosTramo(previo, l) : 0;
+    const llega = reloj;
+    reloj += estanciaDe(l);
+    return { llega, sale: reloj };
+  });
+}
+
+/**
+ * Orden de un día: el café a primera hora, las visitas en ruta corta, la comida a mediodía (antes de una visita
+ * larga que se coma la hora), los miradores hacia el atardecer, la cena después y las copas lo último.
+ * `puesta` es la hora local de la puesta de sol en minutos; sin ella, los miradores van al final de la tarde.
+ */
+function ordenarDia(v, dia, lugares, puesta = null) {
+  const { inicio, fin } = extremosDelDia(v, dia);
+  const de = (tipo) => lugares.filter((l) => l.tipo === tipo);
+  const visitas = ordenarRuta(lugares.filter((l) => !esParaComer(l) && l.tipo !== 'mirador'), inicio, fin);
+  const ruta = [...ordenarRuta(de('cafe'), inicio, visitas[0] ?? fin), ...visitas];
+  const comidas = de('comida');
+  let cenas = [];
+  if (comidas.length) {
+    const horas = relojDe(v, dia, ruta, inicio);
+    let hueco = horas.findIndex((h) => h.llega >= 13 * 60 || (h.llega >= 12 * 60 && h.sale > 14 * 60 + 30));
+    if (hueco === -1) hueco = ruta.length;
+    // Para comer, el sitio más cerca de donde se está a esa hora; el resto, para cenar al final.
+    const junto = ruta[hueco - 1] ?? ruta[hueco] ?? inicio;
+    if (junto) comidas.sort((a, b) => distanciaKm(a, junto) - distanciaKm(b, junto));
+    const [comer, ...resto] = comidas;
+    ruta.splice(hueco, 0, comer);
+    cenas = resto;
+  }
+  const miradores = de('mirador');
+  if (miradores.length) {
+    // Lo más tarde posible llegando al menos media hora antes de la puesta, si se sabe; si no, al final de la tarde.
+    // Nunca antes de la comida, para no retrasarla.
+    const reloj = relojDe(v, dia, ruta, inicio);
+    const horas = [...reloj.map((h) => h.llega), reloj.at(-1)?.sale ?? DE];
+    const ultimo = horas.findLastIndex((h) => h <= puesta - 30);
+    const sitio = puesta === null ? ruta.length : Math.max(ultimo, ruta.findIndex((l) => l.tipo === 'comida') + 1);
+    ruta.splice(sitio, 0, ...ordenarRuta(miradores, ruta[sitio - 1] ?? inicio, ruta[sitio] ?? fin));
+  }
+  ruta.push(...ordenarRuta(cenas, ruta.at(-1) ?? inicio, fin));
+  return [...ruta, ...ordenarRuta(de('copas'), ruta.at(-1) ?? inicio, fin)];
+}
+
+/** Ordena las paradas dentro de cada día sin cambiar ninguna de día; las que no tienen día quedan igual. */
+export function ordenarDias(v, { puesta = () => null } = {}) {
+  const dias = Array.from({ length: v.dias }, (_, i) => i + 1).flatMap((d) => ordenarDia(v, d, v.lugares.filter((l) => l.dia === d), puesta(d)));
   return [...dias, ...v.lugares.filter((l) => !l.dia)];
 }
 
-/** Asigna día y orden a los lugares según cercanía, tiempo útil de cada día y hoteles. */
-export function organizar(v) {
+/**
+ * Asigna día y orden a los lugares: por hoteles, por las horas que ocupa cada visita y las libres de cada día,
+ * evitando los días que cierran, y con los sitios de comer a su hora. `puesta(dia)` da la hora local de la puesta
+ * de sol de cada día, si se sabe, para llevar los miradores al atardecer.
+ */
+export function organizar(v, { puesta = () => null } = {}) {
   const dias = Array.from({ length: v.dias }, (_, i) => i + 1);
   const pesos = minutosUtiles(v);
   // Con hoteles en ciudades distintas, cada lugar va a los días del hotel más cercano.
@@ -150,11 +257,16 @@ export function organizar(v) {
     } else bases.push({ hotel: fin, dias: [d] });
   }
   const masCerca = (l) => bases.reduce((a, b) => (tramo(l, b.hotel) < tramo(l, a.hotel) ? b : a));
-  const asignados = bases.flatMap((base) => repartir(v.lugares.filter((l) => masCerca(l) === base), base.dias, pesos));
-  return dias.flatMap((d) => {
-    const { inicio, fin } = extremosDelDia(v, d);
-    return ordenarRuta(asignados.filter((l) => l.dia === d), inicio, fin);
+  const asignados = bases.flatMap((base) => {
+    const suyos = v.lugares.filter((l) => masCerca(l) === base);
+    // Los días sin tiempo libre (llegar de noche, volver de mañana) solo se usan si no hay otros.
+    const conTiempo = base.dias.filter((d) => pesos[d - 1] > 0);
+    const utiles = conTiempo.length ? conTiempo : base.dias;
+    const visitas = repartir(suyos.filter((l) => !esParaComer(l)), base.dias, pesos, base.hotel);
+    moverCerrados(v, visitas, utiles);
+    return [...visitas, ...repartirComidas(v, suyos.filter(esParaComer), visitas, utiles, base.hotel)];
   });
+  return [...dias.flatMap((d) => ordenarDia(v, d, asignados.filter((l) => l.dia === d), puesta(d))), ...asignados.filter((l) => !l.dia)];
 }
 
 const dosCifras = (n) => String(n).padStart(2, '0');
