@@ -296,7 +296,8 @@ async function buscarComidaSinGuardar(puntos) {
   const tipos = Object.keys(AMENIDADES).join('|');
   // Un solo filtro alrededor de la línea entera es mucho más rápido que un círculo por parada.
   const linea = puntos.slice(0, 30).map((p) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`).join(',');
-  const consulta = `[out:json][timeout:25];nwr["amenity"~"^(${tipos})$"]["name"](around:400,${linea});out center 400;`;
+  // En un centro histórico salen más de mil: el tope es alto para no dejar fuera ninguno cercano.
+  const consulta = `[out:json][timeout:25];nwr["amenity"~"^(${tipos})$"]["name"](around:400,${linea});out center 3000;`;
   const { elements = [] } = (await overpass(consulta)) ?? {};
   const vistos = new Set();
   return elements.flatMap(({ type, id, lat, lon, center, tags = {} }) => {

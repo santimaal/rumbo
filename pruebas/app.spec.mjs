@@ -224,6 +224,25 @@ test('los trayectos largos pueden ir en transporte público', async ({ page }) =
   await expect.poll(async () => (await guardados(page))[0].movilidad).toBe('publico');
 });
 
+test('comer cerca enseña más sitios al pedirlo y mide la distancia también al hotel', async ({ page }) => {
+  const sitios = Array.from({ length: 45 }, (_, i) => ({
+    type: 'node', id: 100 + i, lat: 41.8902 + (i + 1) * 0.0002, lon: 12.4922, tags: { amenity: 'restaurant', name: `Trattoria ${i + 1}` },
+  }));
+  sitios.push({ type: 'node', id: 9, lat: 41.9031, lon: 12.4960, tags: { amenity: 'restaurant', name: 'Junto al Hotel' } });
+  await sinRed(page, { horarios: sitios });
+  await sembrar(page, [viaje({ hoteles: [{ nombre: 'Hotel Roma', lat: 41.9030, lon: 12.4960, desde: 1 }], lugares: [lugar('a', 'Coliseo', 41.8902, 12.4922, 1)] })]);
+  await page.goto('/');
+  await page.getByText('Roma', { exact: true }).click();
+  await page.locator('.dia').first().getByRole('button', { name: '🍽️ Comer cerca' }).click();
+  const dialogo = page.getByRole('dialog', { name: /Comer cerca/ });
+  await expect(dialogo.getByText('Junto al Hotel')).toBeVisible();
+  await expect(dialogo.locator('.hallazgo', { hasText: 'Junto al Hotel' })).toContainText(/a .* de Hotel Roma/);
+  await expect(dialogo.locator('.hallazgo')).toHaveCount(40);
+  await dialogo.getByRole('button', { name: 'Ver más (quedan 6)' }).click();
+  await expect(dialogo.locator('.hallazgo')).toHaveCount(46);
+  await expect(dialogo.getByRole('button', { name: /Ver más/ })).toHaveCount(0);
+});
+
 test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ page, browser }) => {
   await sinRed(page);
   await page.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
@@ -785,14 +804,14 @@ test('los lugares que el asistente no pudo situar los sitúa la app al abrir el 
 test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) => {
   await sinRed(page);
   await sembrar(page, [viaje()], { novedadesVistas: false });
-  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '13'); sessionStorage.setItem('vista', '1'); } });
+  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '15'); sessionStorage.setItem('vista', '1'); } });
   await page.goto('/');
   const ventana = page.getByRole('dialog', { name: /Novedades de Rumbo/ });
   await expect(ventana).toBeVisible();
   // Con una sola versión no hay título por versión, ni restos como «null».
-  await expect(ventana).toContainText('a la izquierda para borrarlo');
+  await expect(ventana).toContainText('«Ver más»');
   await expect(ventana).not.toContainText('null');
-  await expect(ventana).not.toContainText('ver solo ese día');
+  await expect(ventana).not.toContainText('transporte público');
   await ventana.getByRole('button', { name: 'Entendido' }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
@@ -800,7 +819,7 @@ test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) 
   // Desde Ajustes se pueden volver a ver.
   await page.getByRole('button', { name: 'Ajustes' }).click();
   await page.getByRole('button', { name: 'Ver novedades' }).click();
-  await expect(ventana).toContainText('ver solo ese día');
+  await expect(ventana).toContainText('a la izquierda para borrarlo');
 });
 
 test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {

@@ -1276,6 +1276,7 @@ async function abrirComer(v, dia, inicial = null) {
   const aceptar = $('anadir-comer');
   let tipo = 'comida';
   let sitios = [];
+  let cuantos = 40;
   const marcados = new Set();
   $('comer-titulo').textContent = `Comer cerca · Día ${dia}`;
   aceptar.disabled = true;
@@ -1290,13 +1291,14 @@ async function abrirComer(v, dia, inicial = null) {
       const n = sitios.filter((s) => s.tipo === t).length;
       return el('button', {
         type: 'button', className: 'chip', ariaPressed: String(tipo === t), disabled: !n,
-        textContent: `${categoria(t).icono} ${categoria(t).nombre} (${n})`, onclick: () => { tipo = t; pintarLista(); },
+        textContent: `${categoria(t).icono} ${categoria(t).nombre} (${n})`, onclick: () => { tipo = t; cuantos = 40; pintarLista(); },
       });
     }));
     // Primero lo que abre ese día y está más cerca; lo que cierra, al final.
     const busca = $('buscar-comer').value.trim();
-    const visibles = sitios.filter((s) => s.tipo === tipo && coincide(busca, `${s.nombre} ${s.cocinaTexto}`))
-      .sort((a, b) => (horas(a)?.length === 0) - (horas(b)?.length === 0) || a.km - b.km).slice(0, 40);
+    const todos = sitios.filter((s) => s.tipo === tipo && coincide(busca, `${s.nombre} ${s.cocinaTexto}`))
+      .sort((a, b) => (horas(a)?.length === 0) - (horas(b)?.length === 0) || a.km - b.km);
+    const visibles = todos.slice(0, cuantos);
     estado.textContent = visibles.length ? '' : busca ? 'Ningún sitio se parece a eso.' : 'No hay sitios de este tipo cerca.';
     lista.replaceChildren(...visibles.map((s, i) => {
       const h = horas(s);
@@ -1315,10 +1317,10 @@ async function abrirComer(v, dia, inicial = null) {
           el('label', { htmlFor: id }, el('strong', { textContent: s.nombre }), el('small', { className: h?.length === 0 ? 'cerrado' : '', textContent: ` ${detalle}` })),
           // OpenStreetMap no tiene valoraciones: Google Maps enseña las estrellas, las fotos y la carta.
           enlace('⭐ Opiniones y fotos ↗', enlaceLugar('google', s, v.destino), 'opiniones')));
-    }));
+    }), todos.length > cuantos ? boton(`Ver más (quedan ${todos.length - cuantos})`, () => { cuantos += 40; pintarLista(); }) : '');
   };
   $('buscar-comer').value = '';
-  $('buscar-comer').oninput = pintarLista;
+  $('buscar-comer').oninput = () => { cuantos = 40; pintarLista(); };
 
   const lento = setTimeout(() => {
     if (esta === consultaComer && !sitios.length) estado.textContent = 'Los servidores de mapas van lentos. Sigo buscando…';
@@ -1330,7 +1332,8 @@ async function abrirComer(v, dia, inicial = null) {
     sitios = encontrados
       .filter((s) => !v.lugares.some((l) => distanciaKm(l, s) < 0.05 && parecido(l.nombre, s.nombre) >= 0.5))
       .map((s) => {
-        const cerca = paradas.reduce((a, b) => (distanciaKm(b, s) < distanciaKm(a, s) ? b : a));
+        // La distancia, a la parada más cercana o al hotel si está más a mano.
+        const cerca = puntosDelDia(v, dia, paradas).reduce((a, b) => (distanciaKm(b, s) < distanciaKm(a, s) ? b : a));
         const cocinaTexto = s.cocina.split(';').map((c) => COCINAS[c.trim()] ?? c.trim().replace(/_/g, ' ')).filter(Boolean).join(', ');
         return { ...s, km: distanciaKm(cerca, s), cerca: cerca.nombre, cocinaTexto };
       });

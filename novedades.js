@@ -2,6 +2,13 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 16,
+    cosas: [
+      '🍽️ «Comer cerca» encuentra todos los sitios de la zona, también en los centros con cientos de restaurantes, y con «Ver más» enseña los siguientes.',
+      '🏨 Junto a cada sitio pone si queda cerca de una parada o del hotel.',
+    ],
+  },
+  {
     version: 15,
     cosas: [
       '📍 Durante el viaje la app se abre en el día de hoy y te dice qué toca ahora, cuál es la siguiente parada y a qué hora salir.',
