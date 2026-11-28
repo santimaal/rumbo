@@ -2388,6 +2388,13 @@ $('archivo').onchange = async (e) => {
   }
 };
 
+// La página no se amplía con dos dedos (Safari no siempre hace caso a la etiqueta viewport); el mapa sí.
+const fueraDelMapa = (e) => !e.target.closest?.('.maplibregl-map');
+for (const gesto of ['gesturestart', 'gesturechange']) {
+  document.addEventListener(gesto, (e) => { if (fueraDelMapa(e)) e.preventDefault(); }, { passive: false });
+}
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 && fueraDelMapa(e)) e.preventDefault(); }, { passive: false });
+
 // En el móvil el teclado tapa la parte de abajo sin encoger la página: las hojas suben por encima de él.
 function ajustarAlTeclado() {
   const vista = window.visualViewport;

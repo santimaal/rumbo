@@ -244,3 +244,6 @@ textarea { resize: vertical; }
 /* Con el teclado abierto, la hoja se apoya encima de él y cabe en lo que queda de pantalla. */
 .con-teclado dialog { margin: auto auto var(--teclado); max-height: calc(var(--visible) - 12px); border-radius: 22px 22px 0 0; padding-bottom: 18px; }
 .maplibregl-ctrl-group .centrar-mapa { display: grid; place-items: center; width: 29px; height: 29px; min-height: 0; color: #333; }
+/* La página no se amplía con los dedos ni con doble toque; el mapa sí (MapLibre gestiona sus gestos). */
+html { touch-action: pan-x pan-y; }
+.maplibregl-map { touch-action: none; }

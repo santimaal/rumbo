@@ -302,6 +302,23 @@ test('descarga el mapa, las rutas y las fotos para usar el viaje sin conexión',
   await expect(page.getByRole('button', { name: /Sin conexión/ })).toContainText('Hay cambios: vuelve a descargarlo');
 });
 
+test('la página no se amplía con los dedos, el mapa sí', async ({ page }) => {
+  await sinRed(page);
+  await page.goto('/');
+  await expect(page.locator('meta[name=viewport]')).toHaveAttribute('content', /maximum-scale=1, user-scalable=no/);
+  const bloqueado = (dentroDelMapa) => page.evaluate((dentro) => {
+    const sitio = document.createElement('div');
+    if (dentro) sitio.className = 'maplibregl-map';
+    document.body.append(sitio);
+    const gesto = new Event('gesturestart', { bubbles: true, cancelable: true });
+    sitio.dispatchEvent(gesto);
+    sitio.remove();
+    return gesto.defaultPrevented;
+  }, dentroDelMapa);
+  expect(await bloqueado(false)).toBe(true);
+  expect(await bloqueado(true)).toBe(false);
+});
+
 test('un viaje compartido por enlace se puede añadir en otro móvil', async ({ page, browser }) => {
   await sinRed(page);
   await page.addInitScript(() => { navigator.share = async ({ url }) => { window.compartido = url; }; });
@@ -863,14 +880,14 @@ test('los lugares que el asistente no pudo situar los sitúa la app al abrir el 
 test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) => {
   await sinRed(page);
   await sembrar(page, [viaje()], { novedadesVistas: false });
-  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '16'); sessionStorage.setItem('vista', '1'); } });
+  await page.addInitScript(() => { if (!sessionStorage.getItem('vista')) { localStorage.setItem('rumbo-novedades', '17'); sessionStorage.setItem('vista', '1'); } });
   await page.goto('/');
   const ventana = page.getByRole('dialog', { name: /Novedades de Rumbo/ });
   await expect(ventana).toBeVisible();
   // Con una sola versión no hay título por versión, ni restos como «null».
-  await expect(ventana).toContainText('descarga el mapa');
+  await expect(ventana).toContainText('pellizcar');
   await expect(ventana).not.toContainText('null');
-  await expect(ventana).not.toContainText('«Ver más»');
+  await expect(ventana).not.toContainText('descarga el mapa');
   await ventana.getByRole('button', { name: 'Entendido' }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Rumbo' })).toBeVisible();
@@ -878,7 +895,7 @@ test('tras actualizar se enseñan las novedades una sola vez', async ({ page }) 
   // Desde Ajustes se pueden volver a ver.
   await page.getByRole('button', { name: 'Ajustes' }).click();
   await page.getByRole('button', { name: 'Ver novedades' }).click();
-  await expect(ventana).toContainText('transporte público');
+  await expect(ventana).toContainText('«Ver más»');
 });
 
 test('a quien estrena la app no se le enseñan novedades', async ({ page }) => {

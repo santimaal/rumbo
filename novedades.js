@@ -2,6 +2,10 @@
 // La primera versión de la lista es la actual: tiene que coincidir con la caché de sw.js.
 export const NOVEDADES = [
   {
+    version: 18,
+    cosas: ['🤏 La app ya no se amplía al pellizcar con dos dedos ni con doble toque; el mapa sí se sigue ampliando.'],
+  },
+  {
     version: 17,
     cosas: [
       '⏰ Cada parada avisa si llegas antes de que abra, cuando ya ha cerrado o con menos de una hora antes del cierre.',
